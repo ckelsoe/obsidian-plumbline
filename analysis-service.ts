@@ -10,15 +10,20 @@ import type PlumblinePlugin from './main';
 export class AnalysisService {
 	constructor(private readonly plugin: PlumblinePlugin) {}
 
-	// Analyze the active markdown note. Returns null when no markdown editor is
-	// focused (a non-editor pane, or an empty workspace).
-	analyzeActiveNote(): LintResult | null {
-		const view =
-			this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!view) {
-			return null;
-		}
+	// The active markdown note, or null when a non-editor pane is focused.
+	activeMarkdownView(): MarkdownView | null {
+		return this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+	}
+
+	// Run the engine against a specific markdown view.
+	analyze(view: MarkdownView): LintResult {
 		const config = resolveConfig(this.plugin.settings.activeProfile);
 		return lint(view.editor.getValue(), config);
+	}
+
+	// Convenience for callers that only need the active note (the rhythm command).
+	analyzeActiveNote(): LintResult | null {
+		const view = this.activeMarkdownView();
+		return view ? this.analyze(view) : null;
 	}
 }
