@@ -7,8 +7,7 @@ import {
 	ViewUpdate,
 } from '@codemirror/view';
 import { lint } from './engine/lint';
-import { resolveConfig } from './engine/config';
-import { Severity } from './engine/types';
+import { ResolvedConfig, Severity } from './engine/types';
 
 function markFor(severity: Severity, message: string): Decoration {
 	return Decoration.mark({
@@ -17,8 +16,11 @@ function markFor(severity: Severity, message: string): Decoration {
 	});
 }
 
-function buildDecorations(view: EditorView, profileId: string): DecorationSet {
-	const result = lint(view.state.doc.toString(), resolveConfig(profileId));
+function buildDecorations(
+	view: EditorView,
+	config: ResolvedConfig,
+): DecorationSet {
+	const result = lint(view.state.doc.toString(), config);
 	const docLength = view.state.doc.length;
 	const ranges: Range<Decoration>[] = [];
 	for (const d of result.diagnostics) {
@@ -32,21 +34,24 @@ function buildDecorations(view: EditorView, profileId: string): DecorationSet {
 
 // A CodeMirror view plugin that underlines every flagged phrase in the active
 // editor and shows the rule message on hover. It rebuilds when the document
-// changes; `getProfileId` is read on each build so the active profile is current.
-export function plumblineDecorations(getProfileId: () => string): Extension {
+// changes; `getConfig` is read on each build so the active profile and any vault
+// overrides are current.
+export function plumblineDecorations(
+	getConfig: () => ResolvedConfig,
+): Extension {
 	return ViewPlugin.fromClass(
 		class {
 			decorations: DecorationSet;
 
 			constructor(view: EditorView) {
-				this.decorations = buildDecorations(view, getProfileId());
+				this.decorations = buildDecorations(view, getConfig());
 			}
 
 			update(update: ViewUpdate): void {
 				if (update.docChanged) {
 					this.decorations = buildDecorations(
 						update.view,
-						getProfileId(),
+						getConfig(),
 					);
 				}
 			}

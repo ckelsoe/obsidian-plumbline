@@ -1,6 +1,5 @@
 import { MarkdownView } from 'obsidian';
 import { lint } from './engine/lint';
-import { resolveConfig } from './engine/config';
 import { LintResult } from './engine/types';
 import type PlumblinePlugin from './main';
 
@@ -15,10 +14,10 @@ export class AnalysisService {
 		return this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
 	}
 
-	// Run the engine against a specific markdown view.
+	// Run the engine against a specific markdown view, using the plugin's current
+	// resolved config (active profile plus vault overrides).
 	analyze(view: MarkdownView): LintResult {
-		const config = resolveConfig(this.plugin.settings.activeProfile);
-		return lint(view.editor.getValue(), config);
+		return lint(view.editor.getValue(), this.plugin.resolvedConfig());
 	}
 
 	// Convenience for callers that only need the active note (the rhythm command).
