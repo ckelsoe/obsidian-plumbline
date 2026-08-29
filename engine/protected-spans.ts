@@ -1,4 +1,5 @@
 import { ResolvedConfig, Span } from './types';
+import { scriptureSpans, SCRIPTURE_SPAN_KIND } from './scripture';
 
 // The base protected-span sources every profile starts with. Packs contribute
 // more (scripture quotes, dialogue); a profile selects which are active.
@@ -102,6 +103,9 @@ export function protectedSpans(text: string, config: ResolvedConfig): Span[] {
 	}
 	if (kinds.has('code')) {
 		collected.push(...inlineCodeSpans(text));
+	}
+	if (kinds.has(SCRIPTURE_SPAN_KIND)) {
+		collected.push(...scriptureSpans(text));
 	}
 	return mergeSpans(collected);
 }
