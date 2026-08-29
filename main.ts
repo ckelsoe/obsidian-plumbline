@@ -101,7 +101,7 @@ export default class PlumblinePlugin extends Plugin {
 			return;
 		}
 		const result = this.analysis.analyzeActiveNote();
-		this.statusBar.setText(result ? rhythmStatusText(result.metrics) : '');
+		this.statusBar.setText(result ? rhythmStatusText(result) : '');
 	}
 
 	private showRhythmNotice(): void {
@@ -110,6 +110,6 @@ export default class PlumblinePlugin extends Plugin {
 			new Notice('Plumbline: open a note to see its prose rhythm.');
 			return;
 		}
-		new Notice(rhythmDetail(result.metrics));
+		new Notice(rhythmDetail(result));
 	}
 }

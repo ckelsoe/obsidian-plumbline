@@ -24,6 +24,19 @@ export interface Diagnostic {
 	packId: string;
 }
 
+// A rule as data, not code. A mechanical rule flags any of its `phrases`, matched
+// case-insensitively at word boundaries, outside the protected spans. Its slug is
+// the stable config key (never the ruleset number); severity is the default a
+// profile can override. See config-model.md.
+export interface Rule {
+	slug: string;
+	packId: string;
+	category: string; // A-H, from detection-ruleset.md
+	severity: Severity;
+	message: string;
+	phrases: string[];
+}
+
 // Per-document statistics, so the panel and the report show the rhythm summary
 // without re-deriving it. Burstiness is the coefficient of variation of
 // sentence length (see config-model.md).
@@ -41,10 +54,11 @@ export interface LintResult {
 }
 
 // The fully cascaded config for one document. A resolver produces this and hands
-// it to the engine; the engine never resolves config itself. Today it carries
-// only the active profile id and which base span sources are on. The pack and
-// profile cascade (config-model.md) fills the rest in a later milestone.
+// it to the engine; the engine never resolves config itself. It carries the
+// active profile id, which base span sources are on, and the active rules. The
+// full pack and profile cascade (config-model.md) fills this in over time.
 export interface ResolvedConfig {
 	profileId: string;
 	protectedSpanKinds: string[];
+	rules: Rule[];
 }

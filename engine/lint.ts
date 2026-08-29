@@ -1,5 +1,6 @@
 import { LintResult, Metrics, ResolvedConfig } from './types';
 import { protectedSpans, maskSpans } from './protected-spans';
+import { applyRules } from './apply-rules';
 import {
 	sentenceLengths,
 	mean,
@@ -7,9 +8,9 @@ import {
 } from './sentence-stats';
 
 // The engine entry point: text in, diagnostics out. Runs the protected-span
-// pass, masks those spans, and computes the rhythm metrics over the remaining
-// prose. Rules are added in later milestones; today it reports metrics and the
-// span map, and no diagnostics.
+// pass, masks those spans, computes the rhythm metrics over the remaining prose,
+// and runs the active rules. Because the rules run over masked text, code and
+// quoted material never trigger a flag, and the offsets map back onto the source.
 export function lint(text: string, config: ResolvedConfig): LintResult {
 	const spans = protectedSpans(text, config);
 	const prose = maskSpans(text, spans);
@@ -21,5 +22,6 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 		meanSentenceLength: mean(lengths),
 		burstiness: coefficientOfVariation(lengths),
 	};
-	return { diagnostics: [], metrics, spans };
+	const diagnostics = applyRules(prose, config.rules);
+	return { diagnostics, metrics, spans };
 }

@@ -1,18 +1,27 @@
-import { Metrics } from './engine/types';
+import { LintResult } from './engine/types';
 
-// Presentation helpers for the rhythm metrics. Pure and Obsidian-free, so they
-// are unit-tested; the plugin and a future CLI both render from these.
+// Presentation helpers for a lint result. Pure and Obsidian-free, so they are
+// unit-tested; the plugin and a future CLI both render from these.
 
-// Short status-bar label for the active note's rhythm.
-export function rhythmStatusText(metrics: Metrics): string {
-	if (metrics.sentences === 0) {
+function flagLabel(count: number): string {
+	return `${count} flag${count === 1 ? '' : 's'}`;
+}
+
+// Short status-bar label: the active note's rhythm, and the flag count if any.
+export function rhythmStatusText(result: LintResult): string {
+	if (result.metrics.sentences === 0) {
 		return 'Rhythm: no prose';
 	}
-	return `Rhythm ${metrics.burstiness.toFixed(2)} CV`;
+	const base = `Rhythm ${result.metrics.burstiness.toFixed(2)} CV`;
+	if (result.diagnostics.length === 0) {
+		return base;
+	}
+	return `${base}, ${flagLabel(result.diagnostics.length)}`;
 }
 
 // Multi-line detail for the on-demand notice.
-export function rhythmDetail(metrics: Metrics): string {
+export function rhythmDetail(result: LintResult): string {
+	const { metrics, diagnostics } = result;
 	if (metrics.sentences === 0) {
 		return 'No prose found in this note.';
 	}
@@ -21,5 +30,6 @@ export function rhythmDetail(metrics: Metrics): string {
 		`Sentences: ${metrics.sentences}`,
 		`Words: ${metrics.words}`,
 		`Mean sentence length: ${metrics.meanSentenceLength.toFixed(1)}`,
+		`Flags: ${diagnostics.length}`,
 	].join('\n');
 }
