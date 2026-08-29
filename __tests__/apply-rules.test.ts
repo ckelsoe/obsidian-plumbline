@@ -72,4 +72,44 @@ describe('applyRules', () => {
 		).map((d) => d.ruleSlug);
 		expect(slugs.filter((s) => s === 'flagged-register').length).toBe(2);
 	});
+
+	it('flags hollow attribution', () => {
+		expect(
+			applyRules('Scholars note that this is late.', BASE_RULES).map(
+				(d) => d.ruleSlug,
+			),
+		).toContain('hollow-attribution');
+	});
+
+	it('flags placeholder memory', () => {
+		expect(
+			applyRules('At one point I struggled with this.', BASE_RULES).map(
+				(d) => d.ruleSlug,
+			),
+		).toContain('placeholder-memory');
+	});
+
+	it('flags rating your own point', () => {
+		expect(
+			applyRules('The contrast is stark here.', BASE_RULES).map(
+				(d) => d.ruleSlug,
+			),
+		).toContain('impact-self-rating');
+	});
+
+	it('flags a trailing participial after a comma', () => {
+		const diags = applyRules(
+			'David returns four times, creating a sense of grief.',
+			BASE_RULES,
+		);
+		expect(diags.map((d) => d.ruleSlug)).toContain('trailing-participial');
+	});
+
+	it('does not flag a participle that is not comma-prefixed', () => {
+		expect(
+			applyRules('Creating art is hard work.', BASE_RULES).map(
+				(d) => d.ruleSlug,
+			),
+		).not.toContain('trailing-participial');
+	});
 });
