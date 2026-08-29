@@ -18,3 +18,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Inline diagnostics: flagged phrases are underlined in the editor, with the rule message on hover.
 - Findings panel: a side panel lists every flag in the active note, and clicking one jumps to it in the editor. Open it from the ribbon or the command palette.
 - More base rules: summative-closer and cinematic-opener, plus a longer flagged-vocabulary list.
+- Heuristic cross-sentence rules: negation-assertion (a negation set up only to be corrected) and anaphora (a repeated sentence opening), flagged as suggestions.
