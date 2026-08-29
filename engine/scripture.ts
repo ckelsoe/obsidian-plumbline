@@ -63,31 +63,70 @@ function findCitations(text: string): CitationMatch[] {
 	return matches;
 }
 
-// Detect inline quoted scripture: a double-quoted span (straight or curly)
-// followed by a citation. For each citation, walk back to the quote that
-// precedes it. No lookbehind, no backtracking regex.
+// For a citation at `open`, find the quote that precedes it: the opening and
+// closing double-quote offsets, or null when there is no quote before it. No
+// lookbehind, no backtracking regex.
+function precedingQuote(
+	text: string,
+	open: number,
+): { openQuote: number; closeQuote: number } | null {
+	let i = open - 1;
+	while (i >= 0 && isSpace(text[i])) {
+		i--;
+	}
+	if (i < 0 || !isDoubleQuote(text[i])) {
+		return null;
+	}
+	let start = i - 1;
+	while (start >= 0 && !isDoubleQuote(text[start])) {
+		start--;
+	}
+	if (start < 0) {
+		return null;
+	}
+	return { openQuote: start, closeQuote: i };
+}
+
+// Detect inline quoted scripture: a double-quoted span followed by a citation.
 export function scriptureSpans(text: string): Span[] {
 	const spans: Span[] = [];
 	for (const match of findCitations(text)) {
-		// Walk back over whitespace to the closing quote before the citation.
-		let i = match.open - 1;
-		while (i >= 0 && isSpace(text[i])) {
-			i--;
+		const quote = precedingQuote(text, match.open);
+		if (quote) {
+			spans.push({
+				start: quote.openQuote,
+				end: match.close + 1,
+				kind: SCRIPTURE_SPAN_KIND,
+			});
 		}
-		if (i < 0 || !isDoubleQuote(text[i])) {
-			continue;
-		}
-		// Walk back to the opening quote.
-		let start = i - 1;
-		while (start >= 0 && !isDoubleQuote(text[start])) {
-			start--;
-		}
-		if (start < 0) {
-			continue;
-		}
-		spans.push({ start, end: match.close + 1, kind: SCRIPTURE_SPAN_KIND });
 	}
 	return spans;
+}
+
+export interface ScriptureQuote {
+	quote: string;
+	citation: Citation;
+	start: number;
+	end: number;
+}
+
+// Every quoted verse with its parsed citation and the quoted text (between the
+// quotes), for the verbatim-diff check.
+export function scriptureQuotes(text: string): ScriptureQuote[] {
+	const quotes: ScriptureQuote[] = [];
+	for (const match of findCitations(text)) {
+		const citation = parseCitation(match.content);
+		const quote = precedingQuote(text, match.open);
+		if (citation && quote) {
+			quotes.push({
+				quote: text.slice(quote.openQuote + 1, quote.closeQuote),
+				citation,
+				start: quote.openQuote,
+				end: match.close + 1,
+			});
+		}
+	}
+	return quotes;
 }
 
 // Parse every scripture citation in the text (book, chapter, verses, translation).
