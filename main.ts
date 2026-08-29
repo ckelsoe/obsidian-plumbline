@@ -6,8 +6,10 @@ import { plumblineDecorations } from './editor-decorations';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
 import { LintResult, ResolvedConfig } from './engine/types';
 import { buildReport } from './report';
-import { scriptureReferences } from './engine/scripture';
+import { scriptureReferences, scriptureQuotes } from './engine/scripture';
 import { summarizeScripture } from './engine/citation';
+import { verseMatches } from './engine/verbatim';
+import { CorpusService } from './corpus-service';
 import { resolveConfig } from './engine/config';
 import {
 	VaultConfig,
@@ -33,6 +35,7 @@ export default class PlumblinePlugin extends Plugin {
 	settings: PlumblineSettings = { ...DEFAULT_SETTINGS };
 
 	private readonly analysis = new AnalysisService(this);
+	private readonly corpus = new CorpusService(this);
 	private statusBar: HTMLElement | null = null;
 	private refreshTimer: number | null = null;
 	// The most recent markdown analysis, so a panel opened later can populate at
@@ -105,6 +108,13 @@ export default class PlumblinePlugin extends Plugin {
 			name: 'Show scripture usage for the active note',
 			callback: () => {
 				this.showScriptureUsage();
+			},
+		});
+		this.addCommand({
+			id: 'check-quoted-scripture',
+			name: 'Check quoted scripture for the active note',
+			callback: () => {
+				void this.checkScripture();
 			},
 		});
 
@@ -252,6 +262,52 @@ export default class PlumblinePlugin extends Plugin {
 			([translation, entry]) => `${translation}: ${entry.verses} verses`,
 		);
 		new Notice(`Scripture usage\n${lines.join('\n')}`);
+	}
+
+	// Compare each quoted verse against the vault's Bible corpus and report
+	// possible mismatches. Verses it cannot find in the corpus are skipped.
+	private async checkScripture(): Promise<void> {
+		try {
+			const view = this.analysis.activeMarkdownView();
+			if (!view) {
+				new Notice('Plumbline: open a note first.');
+				return;
+			}
+			const quotes = scriptureQuotes(view.editor.getValue());
+			if (quotes.length === 0) {
+				new Notice('Plumbline: no quoted scripture in this note.');
+				return;
+			}
+			let checked = 0;
+			const mismatches: string[] = [];
+			for (const item of quotes) {
+				const corpusText = await this.corpus.verseText(item.citation);
+				if (corpusText === null) {
+					continue;
+				}
+				checked++;
+				if (!verseMatches(item.quote, corpusText)) {
+					const c = item.citation;
+					mismatches.push(`${c.book} ${c.chapter}:${c.verseStart}`);
+				}
+			}
+			if (checked === 0) {
+				new Notice(
+					'Plumbline: could not find these verses in the corpus.',
+				);
+			} else if (mismatches.length === 0) {
+				new Notice(
+					`Plumbline: ${checked} quoted verses checked, all match the corpus.`,
+				);
+			} else {
+				new Notice(
+					`Plumbline: ${mismatches.length} of ${checked} may not match the corpus:\n${mismatches.slice(0, 6).join('\n')}`,
+				);
+			}
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not check scripture.');
+		}
 	}
 
 	// Write the active note's findings as JSON into the vault, so an AI
