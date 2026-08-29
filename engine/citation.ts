@@ -14,13 +14,37 @@ export interface Citation {
 // Parse a citation parenthetical's contents, e.g. "John 6:47, ESV" or
 // "1 John 3:16-18, NIV", into structured fields. Returns null without a
 // chapter:verse. Parsed with string ops, no backtracking regex.
+// A translation is a short alphanumeric code (ESV, NASB, NKJV), not a phrase or a
+// second reference. This keeps a multi-reference parenthetical like
+// "(1 Timothy 3:1, Titus 1:5)" from treating "Titus 1:5" as the translation.
+function isTranslationCode(text: string): boolean {
+	if (text.length === 0 || text.length > 6) {
+		return false;
+	}
+	let hasLetter = false;
+	for (const char of text) {
+		const letter =
+			(char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z');
+		const digit = char >= '0' && char <= '9';
+		if (!letter && !digit) {
+			return false;
+		}
+		if (letter) {
+			hasLetter = true;
+		}
+	}
+	// A bare number (a chapter or verse fragment) is not a translation.
+	return hasLetter;
+}
+
 export function parseCitation(citation: string): Citation | null {
 	const parts = citation
 		.split(',')
 		.map((part) => part.trim())
 		.filter((part) => part.length > 0);
 	const reference = parts[0] ?? '';
-	const translation = parts.length > 1 ? (parts[parts.length - 1] ?? '') : '';
+	const lastPart = parts.length > 1 ? (parts[parts.length - 1] ?? '') : '';
+	const translation = isTranslationCode(lastPart) ? lastPart : '';
 
 	const tokens = reference.split(/\s+/);
 	let refToken = '';

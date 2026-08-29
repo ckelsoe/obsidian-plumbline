@@ -29,6 +29,11 @@ describe('parseCitation', () => {
 	it('returns null without a chapter:verse', () => {
 		expect(parseCitation('a greeting')).toBeNull();
 	});
+
+	it('does not treat a second reference or a bare number as a translation', () => {
+		expect(parseCitation('1 Timothy 3:1, Titus 1:5')?.translation).toBe('');
+		expect(parseCitation('Romans 8:1, 8')?.translation).toBe('');
+	});
 });
 
 describe('countVerses', () => {

@@ -7,8 +7,9 @@ import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
 import { LintResult, ResolvedConfig } from './engine/types';
 import { buildReport } from './report';
 import { scriptureReferences, scriptureQuotes } from './engine/scripture';
-import { summarizeScripture } from './engine/citation';
+import { summarizeScripture, Citation } from './engine/citation';
 import { verseMatches } from './engine/verbatim';
+import { summarizeCaps } from './engine/verse-caps';
 import { CorpusService } from './corpus-service';
 import { resolveConfig } from './engine/config';
 import {
@@ -115,6 +116,13 @@ export default class PlumblinePlugin extends Plugin {
 			name: 'Check quoted scripture for the active note',
 			callback: () => {
 				void this.checkScripture();
+			},
+		});
+		this.addCommand({
+			id: 'check-verse-caps',
+			name: 'Check verse caps across the vault',
+			callback: () => {
+				void this.checkVerseCaps();
 			},
 		});
 
@@ -307,6 +315,41 @@ export default class PlumblinePlugin extends Plugin {
 		} catch (err) {
 			console.error(err);
 			new Notice('Plumbline: could not check scripture.');
+		}
+	}
+
+	// Aggregate scripture citations across the whole vault (excluding the Bible
+	// corpus) and check each translation's distinct-verse total against its cap.
+	private async checkVerseCaps(): Promise<void> {
+		try {
+			const files = this.app.vault
+				.getMarkdownFiles()
+				.filter((file) => !file.path.startsWith('10-bibles/'));
+			// Copyright caps count reproduced verses, so use quoted scripture
+			// only, not bare cross-references.
+			const citations: Citation[] = [];
+			for (const file of files) {
+				const text = await this.app.vault.cachedRead(file);
+				citations.push(...scriptureQuotes(text).map((q) => q.citation));
+			}
+			const usage = summarizeCaps(citations);
+			if (usage.length === 0) {
+				new Notice(
+					'Plumbline: no scripture citations found in the vault.',
+				);
+				return;
+			}
+			const lines = usage.slice(0, 8).map((u) => {
+				const cap = u.cap !== null ? ` / ${u.cap}` : '';
+				const over = u.exceeds ? '  OVER CAP' : '';
+				return `${u.translation}: ${u.verses}${cap} verses${over}`;
+			});
+			new Notice(
+				`Verse caps, ${files.length} notes\n${lines.join('\n')}`,
+			);
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not check verse caps.');
 		}
 	}
 
