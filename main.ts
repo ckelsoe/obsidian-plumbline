@@ -5,6 +5,7 @@ import { rhythmStatusText, rhythmDetail } from './rhythm-format';
 import { plumblineDecorations } from './editor-decorations';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
 import { LintResult } from './engine/types';
+import { buildReport } from './report';
 
 export interface PlumblineSettings {
 	// The active profile selects which rule packs are on and how they are tuned.
@@ -73,6 +74,13 @@ export default class PlumblinePlugin extends Plugin {
 			name: 'Show prose rhythm for the active note',
 			callback: () => {
 				this.showRhythmNotice();
+			},
+		});
+		this.addCommand({
+			id: 'write-flags-report',
+			name: 'Write a flags report for the active note',
+			callback: () => {
+				void this.writeReport();
 			},
 		});
 
@@ -173,5 +181,38 @@ export default class PlumblinePlugin extends Plugin {
 			return;
 		}
 		new Notice(rhythmDetail(result));
+	}
+
+	// Write the active note's findings as JSON into the vault, so an AI
+	// collaborator on the filesystem reads what the editor shows. The internal
+	// try/catch keeps the void'd command body from leaking a rejection.
+	private async writeReport(): Promise<void> {
+		try {
+			const view = this.analysis.activeMarkdownView();
+			const file = view?.file;
+			if (!view || !file) {
+				new Notice('Plumbline: open a note first.');
+				return;
+			}
+			const report = buildReport(
+				file.path,
+				this.settings.activeProfile,
+				view.editor.getValue(),
+				this.analysis.analyze(view),
+			);
+			const dir = '.plumbline';
+			const adapter = this.app.vault.adapter;
+			if (!(await adapter.exists(dir))) {
+				await adapter.mkdir(dir);
+			}
+			const reportPath = `${dir}/${file.path.split('/').join('-')}.json`;
+			await adapter.write(reportPath, JSON.stringify(report, null, 2));
+			new Notice(
+				`Plumbline: wrote ${report.findings.length} flags to ${reportPath}`,
+			);
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not write the report.');
+		}
 	}
 }
