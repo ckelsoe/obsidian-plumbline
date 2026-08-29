@@ -48,4 +48,28 @@ describe('applyRules', () => {
 			[],
 		);
 	});
+
+	it('flags a summative closer', () => {
+		const slugs = applyRules(
+			'In essence, the point is grace.',
+			BASE_RULES,
+		).map((d) => d.ruleSlug);
+		expect(slugs).toContain('summative-closer');
+	});
+
+	it('flags a cinematic opener', () => {
+		const slugs = applyRules(
+			'In a world where doubt is easy, he believed.',
+			BASE_RULES,
+		).map((d) => d.ruleSlug);
+		expect(slugs).toContain('cinematic-opener');
+	});
+
+	it('flags the extended vocabulary', () => {
+		const slugs = applyRules(
+			'We leverage a seamless plan.',
+			BASE_RULES,
+		).map((d) => d.ruleSlug);
+		expect(slugs.filter((s) => s === 'flagged-register').length).toBe(2);
+	});
 });
