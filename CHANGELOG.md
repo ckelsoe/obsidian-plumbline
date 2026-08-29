@@ -20,3 +20,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More base rules: summative-closer and cinematic-opener, plus a longer flagged-vocabulary list.
 - Heuristic cross-sentence rules: negation-assertion (a negation set up only to be corrected) and anaphora (a repeated sentence opening), flagged as suggestions.
 - Flags report: a command writes the active note's findings as JSON into the vault's `.plumbline/` folder, so a collaborator on the filesystem reads the same findings the editor shows.
+- Vault config: a `.plumbline/config.json` file lets you tune the built-in rules and add your own without touching code, reloadable with a command.

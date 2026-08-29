@@ -4,8 +4,14 @@ import { AnalysisService } from './analysis-service';
 import { rhythmStatusText, rhythmDetail } from './rhythm-format';
 import { plumblineDecorations } from './editor-decorations';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
-import { LintResult } from './engine/types';
+import { LintResult, ResolvedConfig } from './engine/types';
 import { buildReport } from './report';
+import { resolveConfig } from './engine/config';
+import {
+	VaultConfig,
+	EMPTY_VAULT_CONFIG,
+	parseVaultConfig,
+} from './engine/vault-config';
 
 export interface PlumblineSettings {
 	// The active profile selects which rule packs are on and how they are tuned.
@@ -31,15 +37,17 @@ export default class PlumblinePlugin extends Plugin {
 	// once and keeps showing while a non-editor pane (like the panel) is focused.
 	private lastResult: LintResult | null = null;
 	private lastView: MarkdownView | null = null;
+	private vaultConfig: VaultConfig = EMPTY_VAULT_CONFIG;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		await this.loadVaultConfig();
 		this.statusBar = this.addStatusBarItem();
 		this.addSettingTab(new PlumblineSettingTab(this.app, this));
 
 		// Underline flagged phrases in the editor, live.
 		this.registerEditorExtension(
-			plumblineDecorations(() => this.settings.activeProfile),
+			plumblineDecorations(() => this.resolvedConfig()),
 		);
 
 		this.registerView(
@@ -83,6 +91,13 @@ export default class PlumblinePlugin extends Plugin {
 				void this.writeReport();
 			},
 		});
+		this.addCommand({
+			id: 'reload-config',
+			name: 'Reload the config from the vault',
+			callback: () => {
+				void this.reloadVaultConfig();
+			},
+		});
 
 		this.app.workspace.onLayoutReady(() => {
 			this.refresh();
@@ -119,6 +134,34 @@ export default class PlumblinePlugin extends Plugin {
 		if (this.lastResult && this.lastView) {
 			panel.update(this.lastResult, this.lastView);
 		}
+	}
+
+	// The resolved config for the active profile, with vault overrides applied.
+	resolvedConfig(): ResolvedConfig {
+		return resolveConfig(this.settings.activeProfile, this.vaultConfig);
+	}
+
+	private async loadVaultConfig(): Promise<void> {
+		try {
+			const path = '.plumbline/config.json';
+			const adapter = this.app.vault.adapter;
+			if (!(await adapter.exists(path))) {
+				this.vaultConfig = EMPTY_VAULT_CONFIG;
+				return;
+			}
+			this.vaultConfig = parseVaultConfig(
+				JSON.parse(await adapter.read(path)) as unknown,
+			);
+		} catch (err) {
+			console.error(err);
+			this.vaultConfig = EMPTY_VAULT_CONFIG;
+		}
+	}
+
+	private async reloadVaultConfig(): Promise<void> {
+		await this.loadVaultConfig();
+		this.refresh();
+		new Notice('Plumbline: reloaded config.');
 	}
 
 	private async activateFindingsView(): Promise<void> {
