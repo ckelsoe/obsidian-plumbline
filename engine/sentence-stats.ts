@@ -7,7 +7,7 @@
 // trailing quotes or brackets ("done." or wrapped!"). Anchored and single-pass,
 // so it stays linear. No lookbehind anywhere: `(?<=...)` is a parse error in
 // JavaScriptCore before iOS 16.4 and would stop the plugin loading at all there.
-const SENTENCE_END = /[.!?]["'”’)\]]*$/;
+export const SENTENCE_END = /[.!?]["'”’)\]]*$/;
 
 // Split prose into sentences by walking whitespace-separated tokens and closing
 // a sentence at the first token that ends on terminal punctuation. The engine's
