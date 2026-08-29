@@ -1,8 +1,10 @@
-import { Notice, Plugin } from 'obsidian';
+import { MarkdownView, Notice, Plugin, WorkspaceLeaf } from 'obsidian';
 import { PlumblineSettingTab } from './settings-tab';
 import { AnalysisService } from './analysis-service';
 import { rhythmStatusText, rhythmDetail } from './rhythm-format';
 import { plumblineDecorations } from './editor-decorations';
+import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
+import { LintResult } from './engine/types';
 
 export interface PlumblineSettings {
 	// The active profile selects which rule packs are on and how they are tuned.
@@ -24,6 +26,10 @@ export default class PlumblinePlugin extends Plugin {
 	private readonly analysis = new AnalysisService(this);
 	private statusBar: HTMLElement | null = null;
 	private refreshTimer: number | null = null;
+	// The most recent markdown analysis, so a panel opened later can populate at
+	// once and keeps showing while a non-editor pane (like the panel) is focused.
+	private lastResult: LintResult | null = null;
+	private lastView: MarkdownView | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -35,10 +41,25 @@ export default class PlumblinePlugin extends Plugin {
 			plumblineDecorations(() => this.settings.activeProfile),
 		);
 
+		this.registerView(
+			FINDINGS_VIEW_TYPE,
+			(leaf: WorkspaceLeaf) => new FindingsView(leaf, this),
+		);
+		this.addRibbonIcon('flag', 'Plumbline flags', () => {
+			void this.activateFindingsView();
+		});
+		this.addCommand({
+			id: 'open-flags-panel',
+			name: 'Open the flags panel',
+			callback: () => {
+				void this.activateFindingsView();
+			},
+		});
+
 		// Switching notes recomputes at once; typing recomputes debounced.
 		this.registerEvent(
 			this.app.workspace.on('active-leaf-change', () => {
-				this.refreshStatus();
+				this.refresh();
 			}),
 		);
 		this.registerEvent(
@@ -56,7 +77,7 @@ export default class PlumblinePlugin extends Plugin {
 		});
 
 		this.app.workspace.onLayoutReady(() => {
-			this.refreshStatus();
+			this.refresh();
 		});
 	}
 
@@ -85,11 +106,33 @@ export default class PlumblinePlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
+	// Push the most recent analysis into a panel (called by the panel on open).
+	populateFindings(panel: FindingsView): void {
+		if (this.lastResult && this.lastView) {
+			panel.update(this.lastResult, this.lastView);
+		}
+	}
+
+	private async activateFindingsView(): Promise<void> {
+		const { workspace } = this.app;
+		const existing = workspace.getLeavesOfType(FINDINGS_VIEW_TYPE)[0];
+		if (existing) {
+			await workspace.revealLeaf(existing);
+			return;
+		}
+		const leaf = workspace.getRightLeaf(false);
+		if (!leaf) {
+			return;
+		}
+		await leaf.setViewState({ type: FINDINGS_VIEW_TYPE, active: true });
+		await workspace.revealLeaf(leaf);
+	}
+
 	private scheduleRefresh(): void {
 		this.clearRefreshTimer();
 		this.refreshTimer = window.setTimeout(() => {
 			this.refreshTimer = null;
-			this.refreshStatus();
+			this.refresh();
 		}, REFRESH_DELAY);
 	}
 
@@ -100,14 +143,27 @@ export default class PlumblinePlugin extends Plugin {
 		}
 	}
 
-	// Recompute the active note's rhythm and show it in the status bar. Cleared
-	// when no markdown note is focused.
-	private refreshStatus(): void {
-		if (!this.statusBar) {
+	// Recompute the active note's analysis and push it to the status bar and any
+	// open findings panel. When a non-markdown pane is focused, the last analysis
+	// stays on screen rather than clearing.
+	private refresh(): void {
+		const view = this.analysis.activeMarkdownView();
+		if (!view) {
 			return;
 		}
-		const result = this.analysis.analyzeActiveNote();
-		this.statusBar.setText(result ? rhythmStatusText(result) : '');
+		const result = this.analysis.analyze(view);
+		this.lastResult = result;
+		this.lastView = view;
+		if (this.statusBar) {
+			this.statusBar.setText(rhythmStatusText(result));
+		}
+		for (const leaf of this.app.workspace.getLeavesOfType(
+			FINDINGS_VIEW_TYPE,
+		)) {
+			if (leaf.view instanceof FindingsView) {
+				leaf.view.update(result, view);
+			}
+		}
 	}
 
 	private showRhythmNotice(): void {

@@ -39,3 +39,43 @@
 .plumbline-flag-suggestion {
 	text-decoration-color: var(--text-accent);
 }
+
+.plumbline-findings-empty {
+	color: var(--text-muted);
+}
+
+.plumbline-findings-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-2-3);
+}
+
+.plumbline-finding {
+	padding: var(--size-2-2) var(--size-2-3);
+	border-radius: var(--radius-s);
+	cursor: pointer;
+}
+
+.plumbline-finding:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.plumbline-finding-head {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--size-2-3);
+}
+
+.plumbline-finding-text {
+	font-weight: var(--font-semibold);
+}
+
+.plumbline-finding-line {
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.plumbline-finding-msg {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
