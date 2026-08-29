@@ -61,15 +61,20 @@ export function standardDeviation(values: number[]): number {
 	return Math.sqrt(variance);
 }
 
-// Coefficient of variation of sentence length: standard deviation over mean.
-// This is "burstiness". Human prose runs high (roughly 0.6 to 1.2); machine
-// prose clusters low (roughly 0.2 to 0.4). The bands are calibrated per profile
-// against the writer's own hand-written baseline, never hardcoded as a verdict.
-export function burstiness(text: string): number {
-	const lengths = sentenceLengths(text);
-	const avg = mean(lengths);
+// Coefficient of variation of a set of values: standard deviation over mean.
+// Zero when the mean is zero (an empty or all-zero set).
+export function coefficientOfVariation(values: number[]): number {
+	const avg = mean(values);
 	if (avg === 0) {
 		return 0;
 	}
-	return standardDeviation(lengths) / avg;
+	return standardDeviation(values) / avg;
+}
+
+// Coefficient of variation of sentence length. This is "burstiness". Human prose
+// runs high (roughly 0.6 to 1.2); machine prose clusters low (roughly 0.2 to
+// 0.4). The bands are calibrated per profile against the writer's own
+// hand-written baseline, never hardcoded as a verdict.
+export function burstiness(text: string): number {
+	return coefficientOfVariation(sentenceLengths(text));
 }
