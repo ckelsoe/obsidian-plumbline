@@ -4,6 +4,7 @@ import {
 	wordCount,
 	mean,
 	standardDeviation,
+	coefficientOfVariation,
 	burstiness,
 } from '../engine/sentence-stats';
 
@@ -49,6 +50,17 @@ describe('mean and standardDeviation', () => {
 
 	it('computes population standard deviation', () => {
 		expect(standardDeviation([2, 4, 6])).toBeCloseTo(1.632993, 5);
+	});
+});
+
+describe('coefficientOfVariation', () => {
+	it('is standard deviation over mean', () => {
+		expect(coefficientOfVariation([2, 4, 6])).toBeCloseTo(0.408248, 5);
+	});
+
+	it('is zero for an empty or all-zero set', () => {
+		expect(coefficientOfVariation([])).toBe(0);
+		expect(coefficientOfVariation([0, 0, 0])).toBe(0);
 	});
 });
 
