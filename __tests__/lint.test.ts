@@ -60,3 +60,26 @@ describe('lint diagnostics', () => {
 		).toEqual([]);
 	});
 });
+
+describe('lint with the scripture profile', () => {
+	it('does not flag AI-tell phrases inside a quoted verse', () => {
+		const text =
+			'As it says, "Delve into wisdom and understanding." (Proverbs 2:2, ESV) He obeyed.';
+		const slugs = lint(text, config).diagnostics.map((d) => d.ruleSlug);
+		expect(slugs).not.toContain('flagged-register');
+	});
+
+	it('still flags the same phrase outside a quoted verse', () => {
+		const text = 'We delve into it. "It is finished." (John 19:30, ESV)';
+		const slugs = lint(text, config).diagnostics.map((d) => d.ruleSlug);
+		expect(slugs).toContain('flagged-register');
+	});
+
+	it('flags devotional register creep', () => {
+		const slugs = lint(
+			'This passage invites us to lean into grace.',
+			config,
+		).diagnostics.map((d) => d.ruleSlug);
+		expect(slugs).toContain('devotional-register');
+	});
+});
