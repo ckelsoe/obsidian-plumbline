@@ -22,3 +22,20 @@
 .plumbline-footer-separator {
 	color: var(--text-faint);
 }
+
+.plumbline-flag {
+	text-decoration-line: underline;
+	text-decoration-style: wavy;
+}
+
+.plumbline-flag-error {
+	text-decoration-color: var(--text-error);
+}
+
+.plumbline-flag-warning {
+	text-decoration-color: var(--text-warning);
+}
+
+.plumbline-flag-suggestion {
+	text-decoration-color: var(--text-accent);
+}
