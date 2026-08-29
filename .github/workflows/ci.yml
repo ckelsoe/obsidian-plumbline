@@ -125,7 +125,10 @@ jobs:
 
   dependency-review:
     name: Dependency Review
-    if: github.event_name == 'pull_request'
+    # dependency-review-action needs the dependency graph, which requires GitHub
+    # Advanced Security on a private repo. Skip while private; it resumes on its
+    # own if the repo is made public.
+    if: github.event_name == 'pull_request' && github.event.repository.visibility == 'public'
     runs-on: ubuntu-latest
     permissions:
       contents: read
