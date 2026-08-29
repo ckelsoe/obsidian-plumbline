@@ -1,4 +1,6 @@
 import { LintResult, Severity } from './engine/types';
+import { scriptureReferences } from './engine/scripture';
+import { summarizeScripture, ScriptureUsage } from './engine/citation';
 
 // A JSON report of one note's findings, written into the vault so an AI
 // collaborator working on the filesystem reads the same findings the writer sees
@@ -19,6 +21,7 @@ export interface Report {
 	file: string;
 	profile: string;
 	metrics: LintResult['metrics'];
+	scripture: ScriptureUsage;
 	findings: ReportFinding[];
 }
 
@@ -44,6 +47,7 @@ export function buildReport(
 		file,
 		profile,
 		metrics: result.metrics,
+		scripture: summarizeScripture(scriptureReferences(text)),
 		findings: result.diagnostics.map((d) => ({
 			ruleSlug: d.ruleSlug,
 			packId: d.packId,

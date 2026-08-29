@@ -6,6 +6,8 @@ import { plumblineDecorations } from './editor-decorations';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
 import { LintResult, ResolvedConfig } from './engine/types';
 import { buildReport } from './report';
+import { scriptureReferences } from './engine/scripture';
+import { summarizeScripture } from './engine/citation';
 import { resolveConfig } from './engine/config';
 import {
 	VaultConfig,
@@ -96,6 +98,13 @@ export default class PlumblinePlugin extends Plugin {
 			name: 'Reload the config from the vault',
 			callback: () => {
 				void this.reloadVaultConfig();
+			},
+		});
+		this.addCommand({
+			id: 'show-scripture-usage',
+			name: 'Show scripture usage for the active note',
+			callback: () => {
+				this.showScriptureUsage();
 			},
 		});
 
@@ -224,6 +233,25 @@ export default class PlumblinePlugin extends Plugin {
 			return;
 		}
 		new Notice(rhythmDetail(result));
+	}
+
+	private showScriptureUsage(): void {
+		const view = this.analysis.activeMarkdownView();
+		if (!view) {
+			new Notice('Plumbline: open a note first.');
+			return;
+		}
+		const usage = summarizeScripture(
+			scriptureReferences(view.editor.getValue()),
+		);
+		if (usage.totalVerses === 0) {
+			new Notice('Plumbline: no scripture citations in this note.');
+			return;
+		}
+		const lines = Object.entries(usage.byTranslation).map(
+			([translation, entry]) => `${translation}: ${entry.verses} verses`,
+		);
+		new Notice(`Scripture usage\n${lines.join('\n')}`);
 	}
 
 	// Write the active note's findings as JSON into the vault, so an AI

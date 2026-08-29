@@ -1,11 +1,12 @@
 import { Rule, Span } from './types';
+import { Citation, parseCitation } from './citation';
 
 // The scripture pack. Its keystone is span detection: quoted verses are not the
 // author's prose to edit, and they legitimately contain the words and structures
 // the style rules flag ("truly, truly", "not X but Y", archaic phrasing). Every
 // rule and every metric skips these spans. The verbatim-diff and verse-cap rules
-// need the Bible corpus and land later; this ships the span detector and the
-// devotional-register rule (ruleset rule 18).
+// need the Bible corpus and land later; this ships the span detector, the
+// devotional-register rule (ruleset rule 18), and citation extraction.
 export const SCRIPTURE_PACK_ID = 'scripture';
 export const SCRIPTURE_SPAN_KIND = 'scripture';
 
@@ -35,14 +36,16 @@ function hasChapterVerse(citation: string): boolean {
 	return false;
 }
 
-// Detect inline quoted scripture: a double-quoted span (straight or curly)
-// followed by a citation whose parenthetical carries a chapter:verse, e.g.
-// `"Truly, truly, I say to you..." (John 6:47, ESV)`. Scanned with indexOf and
-// character checks, never a greedy quote-to-paren regex (which is quadratic on
-// quote-heavy text) and no lookbehind: find each citation, then walk back to the
-// quote that precedes it.
-export function scriptureSpans(text: string): Span[] {
-	const spans: Span[] = [];
+interface CitationMatch {
+	content: string;
+	open: number;
+	close: number;
+}
+
+// Find every parenthetical carrying a chapter:verse, with its positions. Scanned
+// with indexOf, never a greedy regex.
+function findCitations(text: string): CitationMatch[] {
+	const matches: CitationMatch[] = [];
 	for (
 		let open = text.indexOf('(');
 		open !== -1;
@@ -52,11 +55,22 @@ export function scriptureSpans(text: string): Span[] {
 		if (close === -1) {
 			break;
 		}
-		if (!hasChapterVerse(text.slice(open + 1, close))) {
-			continue;
+		const content = text.slice(open + 1, close);
+		if (hasChapterVerse(content)) {
+			matches.push({ content, open, close });
 		}
+	}
+	return matches;
+}
+
+// Detect inline quoted scripture: a double-quoted span (straight or curly)
+// followed by a citation. For each citation, walk back to the quote that
+// precedes it. No lookbehind, no backtracking regex.
+export function scriptureSpans(text: string): Span[] {
+	const spans: Span[] = [];
+	for (const match of findCitations(text)) {
 		// Walk back over whitespace to the closing quote before the citation.
-		let i = open - 1;
+		let i = match.open - 1;
 		while (i >= 0 && isSpace(text[i])) {
 			i--;
 		}
@@ -71,9 +85,21 @@ export function scriptureSpans(text: string): Span[] {
 		if (start < 0) {
 			continue;
 		}
-		spans.push({ start, end: close + 1, kind: SCRIPTURE_SPAN_KIND });
+		spans.push({ start, end: match.close + 1, kind: SCRIPTURE_SPAN_KIND });
 	}
 	return spans;
+}
+
+// Parse every scripture citation in the text (book, chapter, verses, translation).
+export function scriptureReferences(text: string): Citation[] {
+	const citations: Citation[] = [];
+	for (const match of findCitations(text)) {
+		const parsed = parseCitation(match.content);
+		if (parsed) {
+			citations.push(parsed);
+		}
+	}
+	return citations;
 }
 
 // The scripture pack's style rules. Kept separate from the base vocabulary rule
