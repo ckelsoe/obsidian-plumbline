@@ -1,0 +1,12 @@
+# OSV-Scanner suppressions. Every entry must document why the advisory is
+# accepted and what would let us drop it. Revisit whenever the dependency tree
+# changes (a new lockfile may remove the transitive path entirely).
+#
+# No active suppressions. The dev-only transitive advisories that previously
+# needed one (brace-expansion GHSA-mh99-v99m-4gvg and its bypass
+# GHSA-rgw5-rvv9-x895, js-yaml GHSA-5p4m-2wfm-xmqj) are FIXED rather than
+# ignored: the package.json `overrides` block pins each dependency to a patched
+# version, so a fresh scaffold scans clean with no suppressions.
+#
+# Add an [[IgnoredVulns]] entry here only for an advisory with no non-breaking
+# fix, and document why and what would let us drop it.

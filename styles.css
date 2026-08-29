@@ -1,0 +1,24 @@
+.plumbline-settings-footer {
+	justify-content: center;
+	text-align: center;
+	opacity: 0.8;
+}
+
+.plumbline-footer-inner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: var(--size-4-2);
+}
+
+.plumbline-footer-link {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	white-space: nowrap;
+}
+
+.plumbline-footer-separator {
+	color: var(--text-faint);
+}
