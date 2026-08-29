@@ -40,6 +40,34 @@ describe('anaphora', () => {
 	});
 });
 
+describe('rhetorical-pivot', () => {
+	it('flags a rhetorical application question', () => {
+		expect(
+			run('But what does this mean for us today?').map((d) => d.ruleSlug),
+		).toContain('rhetorical-pivot');
+	});
+
+	it('does not flag a plain question of fact', () => {
+		expect(
+			run('He asked for bread and fish.').map((d) => d.ruleSlug),
+		).not.toContain('rhetorical-pivot');
+	});
+});
+
+describe('demonstrative-opener', () => {
+	it('flags a bare demonstrative opener', () => {
+		expect(
+			run('This shows the mercy of God.').map((d) => d.ruleSlug),
+		).toContain('demonstrative-opener');
+	});
+
+	it('does not flag a demonstrative with a noun attached', () => {
+		expect(
+			run('This adoption changes everything.').map((d) => d.ruleSlug),
+		).not.toContain('demonstrative-opener');
+	});
+});
+
 describe('applyHeuristics', () => {
 	it('has no diagnostics for plain prose', () => {
 		expect(run('He kept the promise he made in the spring.')).toEqual([]);
