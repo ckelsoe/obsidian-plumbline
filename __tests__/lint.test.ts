@@ -3,7 +3,7 @@ import { resolveConfig } from '../engine/config';
 
 const config = resolveConfig('scripture-book');
 
-describe('lint', () => {
+describe('lint metrics', () => {
 	it('computes metrics over prose only, skipping headings and code', () => {
 		const text = [
 			'# Heading with several extra words here',
@@ -18,7 +18,6 @@ describe('lint', () => {
 		expect(result.metrics.sentences).toBe(2);
 		// 'Short.' = 1, 'A longer sentence carrying several more words.' = 7.
 		expect(result.metrics.words).toBe(8);
-		expect(result.diagnostics).toEqual([]);
 		expect(result.spans.length).toBeGreaterThan(0);
 	});
 
@@ -33,5 +32,31 @@ describe('lint', () => {
 		expect(result.metrics.sentences).toBe(0);
 		expect(result.metrics.words).toBe(0);
 		expect(result.metrics.burstiness).toBe(0);
+	});
+});
+
+describe('lint diagnostics', () => {
+	it('flags a blocklisted phrase with the right slug and range', () => {
+		const text = 'The promise stands. Read that again.';
+		const flag = lint(text, config).diagnostics.find(
+			(d) => d.ruleSlug === 'reader-direction',
+		);
+		expect(flag).toBeDefined();
+		if (flag) {
+			expect(text.slice(flag.start, flag.end).toLowerCase()).toBe(
+				'read that again',
+			);
+		}
+	});
+
+	it('does not flag phrases inside protected code', () => {
+		const text = '```\nread that again\n```\nClean prose here.';
+		expect(lint(text, config).diagnostics).toEqual([]);
+	});
+
+	it('has no diagnostics for clean prose', () => {
+		expect(
+			lint('He kept the promise he made.', config).diagnostics,
+		).toEqual([]);
 	});
 });

@@ -13,3 +13,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Engine groundwork: pure sentence-rhythm statistics (burstiness) with unit tests.
 - Engine core: the lint() contract plus the base protected-span pass, so code and headings no longer skew the prose metrics.
 - Live rhythm readout: the status bar shows the active note's burstiness as you type, and a command reports the full metrics.
+- Rules as data: the base pack's first mechanical rules flag AI-shaped phrasing over prose, skipping code and quotes, and the status bar shows the flag count for the active note.
