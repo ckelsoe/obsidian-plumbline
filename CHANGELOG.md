@@ -15,3 +15,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Live rhythm readout: the status bar shows the active note's burstiness as you type, and a command reports the full metrics.
 - Rules as data: the base pack's first mechanical rules flag AI-shaped phrasing over prose, skipping code and quotes, and the status bar shows the flag count for the active note.
 - Scripture pack: inline quoted verses with a citation are detected and protected, so no rule fires inside scripture, and a devotional-register rule is added for the scripture profile.
+- Inline diagnostics: flagged phrases are underlined in the editor, with the rule message on hover.

@@ -2,6 +2,7 @@ import { Notice, Plugin } from 'obsidian';
 import { PlumblineSettingTab } from './settings-tab';
 import { AnalysisService } from './analysis-service';
 import { rhythmStatusText, rhythmDetail } from './rhythm-format';
+import { plumblineDecorations } from './editor-decorations';
 
 export interface PlumblineSettings {
 	// The active profile selects which rule packs are on and how they are tuned.
@@ -28,6 +29,11 @@ export default class PlumblinePlugin extends Plugin {
 		await this.loadSettings();
 		this.statusBar = this.addStatusBarItem();
 		this.addSettingTab(new PlumblineSettingTab(this.app, this));
+
+		// Underline flagged phrases in the editor, live.
+		this.registerEditorExtension(
+			plumblineDecorations(() => this.settings.activeProfile),
+		);
 
 		// Switching notes recomputes at once; typing recomputes debounced.
 		this.registerEvent(
