@@ -84,6 +84,89 @@ function openingLength(text: string): number {
 	return match ? match[0].length : text.length;
 }
 
+// Judgment-tier detectors (ruleset rules 12 and 37). Fuzzy by nature: a tool can
+// only flag candidates, so these are suggestions.
+const FIRST_PERSON = new Set(['i', 'my', 'me', 'we', 'our', 'us', 'myself']);
+const MONTHS = new Set([
+	'january',
+	'february',
+	'march',
+	'april',
+	'may',
+	'june',
+	'july',
+	'august',
+	'september',
+	'october',
+	'november',
+	'december',
+]);
+const ABSTRACT_SUFFIXES = ['ion', 'ment', 'ness', 'ity', 'ance', 'ence'];
+
+function words(text: string): string[] {
+	return text
+		.trim()
+		.split(/\s+/)
+		.filter((word) => word.length > 0);
+}
+
+// Strip leading and trailing non-letter characters from a word.
+function cleanWord(word: string): string {
+	const isLetter = (char: string): boolean =>
+		(char >= 'A' && char <= 'Z') ||
+		(char >= 'a' && char <= 'z') ||
+		char === "'";
+	let start = 0;
+	let end = word.length;
+	while (start < end && !isLetter(word[start] ?? '')) {
+		start++;
+	}
+	while (end > start && !isLetter(word[end - 1] ?? '')) {
+		end--;
+	}
+	return word.slice(start, end);
+}
+
+function hasDigit(word: string): boolean {
+	for (const char of word) {
+		if (char >= '0' && char <= '9') {
+			return true;
+		}
+	}
+	return false;
+}
+
+// A concrete anchor: a proper noun (a capitalized word not at the sentence start
+// and not "I"), a number, or a month name.
+function hasConcreteAnchor(sentenceWords: string[]): boolean {
+	for (let i = 0; i < sentenceWords.length; i++) {
+		const raw = sentenceWords[i] ?? '';
+		if (hasDigit(raw)) {
+			return true;
+		}
+		const clean = cleanWord(raw);
+		const capitalized =
+			clean.length > 1 &&
+			clean[0] !== undefined &&
+			clean[0] >= 'A' &&
+			clean[0] <= 'Z';
+		if (i > 0 && capitalized && clean !== 'I') {
+			return true;
+		}
+		if (MONTHS.has(clean.toLowerCase())) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function isAbstractNoun(word: string): boolean {
+	const lower = cleanWord(word).toLowerCase();
+	return (
+		lower.length > 5 && ABSTRACT_SUFFIXES.some((suf) => lower.endsWith(suf))
+	);
+}
+
 export const HEURISTIC_RULES: HeuristicRule[] = [
 	{
 		slug: 'negation-assertion',
@@ -225,6 +308,46 @@ export const HEURISTIC_RULES: HeuristicRule[] = [
 					.trim()
 					.toLowerCase();
 				if (EMPHASIS_FRAGMENTS.has(core)) {
+					ranges.push({ start: sentence.start, end: sentence.end });
+				}
+			}
+			return ranges;
+		},
+	},
+	{
+		slug: 'personal-claims-vague',
+		packId: HEURISTIC_PACK_ID,
+		severity: 'suggestion',
+		message:
+			'Vague personal claim. Add a specific: a name, a date, a place.',
+		run: (_text, sentences) => {
+			const ranges: Range[] = [];
+			for (const sentence of sentences) {
+				const sentenceWords = words(sentence.text);
+				if (sentenceWords.length < 7) {
+					continue;
+				}
+				const firstPerson = sentenceWords.some((word) =>
+					FIRST_PERSON.has(cleanWord(word).toLowerCase()),
+				);
+				if (firstPerson && !hasConcreteAnchor(sentenceWords)) {
+					ranges.push({ start: sentence.start, end: sentence.end });
+				}
+			}
+			return ranges;
+		},
+	},
+	{
+		slug: 'anchor-test',
+		packId: HEURISTIC_PACK_ID,
+		severity: 'suggestion',
+		message: 'Abstract, no anchor. Rewrite onto a concrete particular.',
+		run: (_text, sentences) => {
+			const ranges: Range[] = [];
+			for (const sentence of sentences) {
+				const sentenceWords = words(sentence.text);
+				const abstract = sentenceWords.filter(isAbstractNoun).length;
+				if (abstract >= 3 && !hasConcreteAnchor(sentenceWords)) {
 					ranges.push({ start: sentence.start, end: sentence.end });
 				}
 			}
