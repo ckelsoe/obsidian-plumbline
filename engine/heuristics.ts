@@ -1,5 +1,9 @@
 import { Diagnostic, Severity } from './types';
-import { SentenceSpan } from './sentences';
+import {
+	SentenceSpan,
+	ParagraphSpan,
+	splitParagraphsWithOffsets,
+} from './sentences';
 
 interface Range {
 	start: number;
@@ -11,7 +15,43 @@ interface HeuristicRule {
 	packId: string;
 	severity: Severity;
 	message: string;
-	run(text: string, sentences: SentenceSpan[]): Range[];
+	run(
+		text: string,
+		sentences: SentenceSpan[],
+		paragraphs: ParagraphSpan[],
+	): Range[];
+}
+
+// Paragraph-initial transitions (ruleset rule 16), and whole-sentence emphasis
+// fragments (rule 4).
+const TRANSITION_OPENER =
+	/^(?:however|moreover|furthermore|additionally|consequently|nevertheless|nonetheless|therefore|thus|indeed),/i;
+
+const EMPHASIS_FRAGMENTS = new Set([
+	'period',
+	'full stop',
+	'already',
+	'done',
+	'not anymore',
+	'never again',
+	'end of story',
+	'exactly',
+	'precisely',
+	'one question',
+	'one answer',
+]);
+
+function stripTerminalPunctuation(text: string): string {
+	let end = text.length;
+	while (
+		end > 0 &&
+		(text[end - 1] === '.' ||
+			text[end - 1] === '!' ||
+			text[end - 1] === '?')
+	) {
+		end--;
+	}
+	return text.slice(0, end);
 }
 
 const HEURISTIC_PACK_ID = 'base';
@@ -128,6 +168,69 @@ export const HEURISTIC_RULES: HeuristicRule[] = [
 			return ranges;
 		},
 	},
+	{
+		slug: 'transitional-stacking',
+		packId: HEURISTIC_PACK_ID,
+		severity: 'suggestion',
+		message: 'Transitional stacking. Delete the opener and check the join.',
+		run: (_text, _sentences, paragraphs) => {
+			const ranges: Range[] = [];
+			for (const paragraph of paragraphs) {
+				const match = TRANSITION_OPENER.exec(paragraph.text);
+				if (match) {
+					ranges.push({
+						start: paragraph.start,
+						end: paragraph.start + match[0].length,
+					});
+				}
+			}
+			return ranges;
+		},
+	},
+	{
+		slug: 'formatting-tells',
+		packId: HEURISTIC_PACK_ID,
+		severity: 'suggestion',
+		message:
+			'Formatting tell. Consecutive bold-led paragraphs; write prose.',
+		run: (_text, _sentences, paragraphs) => {
+			const ranges: Range[] = [];
+			for (let i = 1; i < paragraphs.length; i++) {
+				const prev = paragraphs[i - 1];
+				const curr = paragraphs[i];
+				if (
+					prev &&
+					curr &&
+					prev.text.startsWith('**') &&
+					curr.text.startsWith('**')
+				) {
+					ranges.push({
+						start: curr.start,
+						end: curr.start + Math.min(curr.text.length, 40),
+					});
+				}
+			}
+			return ranges;
+		},
+	},
+	{
+		slug: 'emphasis-fragment',
+		packId: HEURISTIC_PACK_ID,
+		severity: 'suggestion',
+		message: 'Emphasis by fragment. Cut it.',
+		run: (_text, sentences) => {
+			const ranges: Range[] = [];
+			for (const sentence of sentences) {
+				const core = stripTerminalPunctuation(sentence.text.trim())
+					.trim()
+					.toLowerCase();
+				if (EMPHASIS_FRAGMENTS.has(core)) {
+					ranges.push({ start: sentence.start, end: sentence.end });
+				}
+			}
+			return ranges;
+		},
+	},
 ];
 
 // Run the cross-sentence heuristics over the masked prose. Offsets map back onto
@@ -137,8 +240,9 @@ export function applyHeuristics(
 	sentences: SentenceSpan[],
 ): Diagnostic[] {
 	const diagnostics: Diagnostic[] = [];
+	const paragraphs = splitParagraphsWithOffsets(text);
 	for (const rule of HEURISTIC_RULES) {
-		for (const range of rule.run(text, sentences)) {
+		for (const range of rule.run(text, sentences, paragraphs)) {
 			if (range.end > range.start) {
 				diagnostics.push({
 					ruleSlug: rule.slug,

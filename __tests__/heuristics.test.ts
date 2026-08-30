@@ -68,6 +68,45 @@ describe('demonstrative-opener', () => {
 	});
 });
 
+describe('transitional-stacking', () => {
+	it('flags a paragraph-initial transition', () => {
+		const text = 'He wrote the letter.\n\nHowever, the church ignored it.';
+		expect(run(text).map((d) => d.ruleSlug)).toContain(
+			'transitional-stacking',
+		);
+	});
+
+	it('does not flag a mid-sentence however', () => {
+		expect(
+			run('The point stands, however, in a smaller way.').map(
+				(d) => d.ruleSlug,
+			),
+		).not.toContain('transitional-stacking');
+	});
+});
+
+describe('formatting-tells', () => {
+	it('flags consecutive bold-led paragraphs', () => {
+		const text =
+			'**First point.** It matters.\n\n**Second.** It also does.';
+		expect(run(text).map((d) => d.ruleSlug)).toContain('formatting-tells');
+	});
+});
+
+describe('emphasis-fragment', () => {
+	it('flags a whole-sentence fragment', () => {
+		expect(
+			run('The verse is clear. Full stop.').map((d) => d.ruleSlug),
+		).toContain('emphasis-fragment');
+	});
+
+	it('does not flag a normal short sentence', () => {
+		expect(run('He wept.').map((d) => d.ruleSlug)).not.toContain(
+			'emphasis-fragment',
+		);
+	});
+});
+
 describe('applyHeuristics', () => {
 	it('has no diagnostics for plain prose', () => {
 		expect(run('He kept the promise he made in the spring.')).toEqual([]);
