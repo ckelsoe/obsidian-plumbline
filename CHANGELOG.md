@@ -26,3 +26,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verse caps: a command aggregates distinct quoted verses per translation across the vault and flags any translation over its copyright cap.
 - More base rules: hollow-attribution, placeholder-memory, self-rating, trailing-participial (comma-prefixed participles).
 - Two more heuristics: rhetorical-pivot (an application question like "But what does this mean for us today?") and demonstrative-opener (a bare "This shows..." with no noun).
+- Structural rules over a new paragraph pass: transitional-stacking (a paragraph-initial "However,"), formatting-tells (consecutive bold-led paragraphs), emphasis-fragment (a whole-sentence fragment like "Full stop.").
