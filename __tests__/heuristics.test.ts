@@ -107,6 +107,32 @@ describe('emphasis-fragment', () => {
 	});
 });
 
+describe('personal-claims-vague', () => {
+	it('flags a first-person claim with no specific', () => {
+		const text =
+			'I grew up in places where belief was measured by feeling.';
+		expect(run(text).map((d) => d.ruleSlug)).toContain(
+			'personal-claims-vague',
+		);
+	});
+
+	it('does not flag when a proper noun anchors it', () => {
+		const text =
+			'I grew up in Dallas where belief was measured by feeling.';
+		expect(run(text).map((d) => d.ruleSlug)).not.toContain(
+			'personal-claims-vague',
+		);
+	});
+});
+
+describe('anchor-test', () => {
+	it('flags an abstract sentence with no concrete anchor', () => {
+		const text =
+			'The path of transformation is devotion, intention, and submission.';
+		expect(run(text).map((d) => d.ruleSlug)).toContain('anchor-test');
+	});
+});
+
 describe('applyHeuristics', () => {
 	it('has no diagnostics for plain prose', () => {
 		expect(run('He kept the promise he made in the spring.')).toEqual([]);
