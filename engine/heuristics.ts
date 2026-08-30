@@ -20,6 +20,16 @@ const HEURISTIC_PACK_ID = 'base';
 // sentence. Anchored, an alternation of literals.
 const NEGATION_OPENER = /^(?:it is not|it's not|this is not|that is not)\b/i;
 
+// A rhetorical-question pivot: an application bridge like "But what does this
+// mean for us today?"
+const RHETORICAL_PIVOT =
+	/^(?:but |so |and |now |yet )?(?:what|how|why|where|who)\b/i;
+
+// A demonstrative opener: a sentence led by a bare "This/That/These/Those" with a
+// linking or action verb rather than a noun attached.
+const DEMONSTRATIVE_OPENER =
+	/^(?:this|that|these|those)\s+(?:is|are|was|were|means|shows|reflects|reveals|points|leads|creates|gives|becomes|matters)\b/i;
+
 // The first `count` words of a sentence, normalized to single spaces, for
 // comparing sentence openings.
 function opening(text: string, count: number): string {
@@ -77,6 +87,41 @@ export const HEURISTIC_RULES: HeuristicRule[] = [
 					ranges.push({
 						start: curr.start,
 						end: curr.start + openingLength(curr.text),
+					});
+				}
+			}
+			return ranges;
+		},
+	},
+	{
+		slug: 'rhetorical-pivot',
+		packId: HEURISTIC_PACK_ID,
+		severity: 'suggestion',
+		message: 'Rhetorical-question pivot. Turn on a specific instead.',
+		run: (_text, sentences) => {
+			const ranges: Range[] = [];
+			for (const sentence of sentences) {
+				const trimmed = sentence.text.trim();
+				if (trimmed.endsWith('?') && RHETORICAL_PIVOT.test(trimmed)) {
+					ranges.push({ start: sentence.start, end: sentence.end });
+				}
+			}
+			return ranges;
+		},
+	},
+	{
+		slug: 'demonstrative-opener',
+		packId: HEURISTIC_PACK_ID,
+		severity: 'suggestion',
+		message:
+			'Demonstrative opener. Name the subject rather than a bare "This".',
+		run: (_text, sentences) => {
+			const ranges: Range[] = [];
+			for (const sentence of sentences) {
+				if (DEMONSTRATIVE_OPENER.test(sentence.text.trimStart())) {
+					ranges.push({
+						start: sentence.start,
+						end: sentence.start + openingLength(sentence.text),
 					});
 				}
 			}
