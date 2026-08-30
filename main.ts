@@ -10,6 +10,7 @@ import { scriptureReferences, scriptureQuotes } from './engine/scripture';
 import { summarizeScripture, Citation } from './engine/citation';
 import { verseMatches } from './engine/verbatim';
 import { summarizeCaps } from './engine/verse-caps';
+import { kdpDisclosure } from './engine/kdp';
 import { CorpusService } from './corpus-service';
 import { resolveConfig } from './engine/config';
 import {
@@ -123,6 +124,13 @@ export default class PlumblinePlugin extends Plugin {
 			name: 'Check verse caps across the vault',
 			callback: () => {
 				void this.checkVerseCaps();
+			},
+		});
+		this.addCommand({
+			id: 'show-kdp-disclosure',
+			name: 'Show AI disclosure for the active note',
+			callback: () => {
+				this.showKdpDisclosure();
 			},
 		});
 
@@ -351,6 +359,37 @@ export default class PlumblinePlugin extends Plugin {
 			console.error(err);
 			new Notice('Plumbline: could not check verse caps.');
 		}
+	}
+
+	// Read the active note's `provenance` frontmatter and report the KDP AI
+	// disclosure it implies (ruleset rule 28).
+	private showKdpDisclosure(): void {
+		const view = this.analysis.activeMarkdownView();
+		if (!view?.file) {
+			new Notice('Plumbline: open a note first.');
+			return;
+		}
+		const frontmatter = this.app.metadataCache.getFileCache(
+			view.file,
+		)?.frontmatter;
+		const raw: unknown = frontmatter?.provenance;
+		const provenance = typeof raw === 'string' ? raw : '';
+		if (provenance === '') {
+			new Notice(
+				'Plumbline: add a "provenance" field (cold, AI-edited, or AI-drafted) to this note.',
+			);
+			return;
+		}
+		const guidance = kdpDisclosure(provenance);
+		if (!guidance) {
+			new Notice(
+				`Plumbline: unknown provenance "${provenance}". Use cold, AI-edited, or AI-drafted.`,
+			);
+			return;
+		}
+		new Notice(
+			`AI disclosure\nCategory: ${guidance.category}\nDisclose to Amazon: ${guidance.disclose ? 'yes' : 'no'}\n${guidance.note}`,
+		);
 	}
 
 	// Write the active note's findings as JSON into the vault, so an AI
