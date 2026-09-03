@@ -357,14 +357,19 @@ export const HEURISTIC_RULES: HeuristicRule[] = [
 ];
 
 // Run the cross-sentence heuristics over the masked prose. Offsets map back onto
-// the source, the same as the mechanical rules.
+// the source, the same as the mechanical rules. A heuristic whose slug is in
+// `disabled` is skipped, so it can be toggled from the vault config like any rule.
 export function applyHeuristics(
 	text: string,
 	sentences: SentenceSpan[],
+	disabled: Set<string> = new Set(),
 ): Diagnostic[] {
 	const diagnostics: Diagnostic[] = [];
 	const paragraphs = splitParagraphsWithOffsets(text);
 	for (const rule of HEURISTIC_RULES) {
+		if (disabled.has(rule.slug)) {
+			continue;
+		}
 		for (const range of rule.run(text, sentences, paragraphs)) {
 			if (range.end > range.start) {
 				diagnostics.push({

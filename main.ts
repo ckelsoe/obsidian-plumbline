@@ -2,7 +2,7 @@ import { MarkdownView, Notice, Plugin, WorkspaceLeaf } from 'obsidian';
 import { PlumblineSettingTab } from './settings-tab';
 import { AnalysisService } from './analysis-service';
 import { rhythmStatusText, rhythmDetail } from './rhythm-format';
-import { plumblineDecorations } from './editor-decorations';
+import { plumblineDecorations, relintEditor } from './editor-decorations';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
 import { LintResult, ResolvedConfig } from './engine/types';
 import { buildReport } from './report';
@@ -12,12 +12,19 @@ import { verseMatches } from './engine/verbatim';
 import { summarizeCaps } from './engine/verse-caps';
 import { kdpDisclosure } from './engine/kdp';
 import { CorpusService } from './corpus-service';
-import { resolveConfig } from './engine/config';
+import { profileRuleInfos, RuleInfo, resolveConfig } from './engine/config';
 import {
 	VaultConfig,
 	EMPTY_VAULT_CONFIG,
 	parseVaultConfig,
 } from './engine/vault-config';
+
+// One built-in rule (mechanical or heuristic), paired with whether the vault
+// config currently has it on. Drives the settings list so a rule can be toggled
+// without hand-editing JSON.
+interface RuleState extends RuleInfo {
+	enabled: boolean;
+}
 
 export interface PlumblineSettings {
 	// The active profile selects which rule packs are on and how they are tuned.
@@ -45,6 +52,13 @@ export default class PlumblinePlugin extends Plugin {
 	private lastResult: LintResult | null = null;
 	private lastView: MarkdownView | null = null;
 	private vaultConfig: VaultConfig = EMPTY_VAULT_CONFIG;
+	// The raw parsed JSON of the vault config, kept verbatim so a settings toggle
+	// rewrites only `disabledRules` and leaves every other hand-authored field
+	// (overrides, custom rules, anything the parser does not model yet) intact.
+	private vaultConfigRaw: Record<string, unknown> = {};
+	// Serializes config writes so two quick toggles cannot interleave their
+	// read-modify-write of the file and drop one.
+	private saveQueue: Promise<void> = Promise.resolve();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -182,21 +196,120 @@ export default class PlumblinePlugin extends Plugin {
 			const adapter = this.app.vault.adapter;
 			if (!(await adapter.exists(path))) {
 				this.vaultConfig = EMPTY_VAULT_CONFIG;
+				this.vaultConfigRaw = {};
 				return;
 			}
-			this.vaultConfig = parseVaultConfig(
-				JSON.parse(await adapter.read(path)) as unknown,
-			);
+			const raw: unknown = JSON.parse(await adapter.read(path));
+			this.vaultConfigRaw =
+				typeof raw === 'object' && raw !== null
+					? (raw as Record<string, unknown>)
+					: {};
+			this.vaultConfig = parseVaultConfig(raw);
 		} catch (err) {
 			console.error(err);
 			this.vaultConfig = EMPTY_VAULT_CONFIG;
+			this.vaultConfigRaw = {};
 		}
 	}
 
 	private async reloadVaultConfig(): Promise<void> {
 		await this.loadVaultConfig();
-		this.refresh();
+		this.applyConfigChange();
 		new Notice('Plumbline: reloaded config.');
+	}
+
+	// The built-in rules for the active profile, mechanical and heuristic, each
+	// paired with whether the vault config currently has it enabled. The settings
+	// tab renders this.
+	profileRuleStates(): RuleState[] {
+		const disabled = new Set(this.vaultConfig.disabledRules);
+		return profileRuleInfos(this.settings.activeProfile).map((info) => ({
+			...info,
+			enabled: !disabled.has(info.slug),
+		}));
+	}
+
+	// Toggle one built-in rule on or off by adding or removing its slug from the
+	// vault config's disabled list, persist it, and re-analyze so the editor,
+	// panel, and status bar all reflect the change at once.
+	async setRuleEnabled(slug: string, enabled: boolean): Promise<void> {
+		const disabled = new Set(this.vaultConfig.disabledRules);
+		if (enabled) {
+			disabled.delete(slug);
+		} else {
+			disabled.add(slug);
+		}
+		this.vaultConfig = {
+			...this.vaultConfig,
+			disabledRules: [...disabled],
+		};
+		await this.saveVaultConfig();
+		this.applyConfigChange();
+	}
+
+	// Persist the vault config, serialized through the save queue so overlapping
+	// toggles apply in order rather than racing on the same file.
+	private async saveVaultConfig(): Promise<void> {
+		this.saveQueue = this.saveQueue.then(() => this.writeVaultConfig());
+		await this.saveQueue;
+	}
+
+	// Write the vault config back to disk, rewriting only `disabledRules`. The
+	// file is re-read first, so a hand-edit or sync since load is preserved rather
+	// than clobbered by a stale in-memory snapshot, and every other field (custom
+	// rules, overrides, anything the parser does not model) is left as authored.
+	// Never throws, so a failure does not wedge the save queue.
+	private async writeVaultConfig(): Promise<void> {
+		try {
+			const dir = '.plumbline';
+			const path = `${dir}/config.json`;
+			const adapter = this.app.vault.adapter;
+			let raw: Record<string, unknown> = {};
+			if (await adapter.exists(path)) {
+				try {
+					const parsed: unknown = JSON.parse(
+						await adapter.read(path),
+					);
+					if (typeof parsed === 'object' && parsed !== null) {
+						raw = parsed as Record<string, unknown>;
+					}
+				} catch (err) {
+					// A malformed file on disk is not a reason to lose the toggle;
+					// start from an empty object and rewrite it cleanly.
+					console.error(err);
+				}
+			} else if (!(await adapter.exists(dir))) {
+				await adapter.mkdir(dir);
+			}
+			raw.disabledRules = this.vaultConfig.disabledRules;
+			this.vaultConfigRaw = raw;
+			// Keep the in-memory config consistent with the merged file, so any
+			// external overrides or custom rules take effect from now on too.
+			this.vaultConfig = parseVaultConfig(raw);
+			await adapter.write(path, JSON.stringify(raw, null, 2));
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not save the config.');
+		}
+	}
+
+	// Re-run analysis everywhere after the active config changes (profile switch,
+	// rule toggle, config reload): status bar, findings panel, and the editor's
+	// live underlines.
+	applyConfigChange(): void {
+		this.refresh();
+		// Re-lint every open Markdown editor, not just the active one, since the
+		// change affects all of them. In reading view the CodeMirror editor may not
+		// be mounted, so guard the handle.
+		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+			const view = leaf.view;
+			if (view instanceof MarkdownView) {
+				const cm = view.editor.cm;
+				if (cm) {
+					relintEditor(cm);
+				}
+			}
+		}
 	}
 
 	private async activateFindingsView(): Promise<void> {

@@ -5,6 +5,19 @@ function run(text: string) {
 	return applyHeuristics(text, splitSentencesWithOffsets(text));
 }
 
+describe('applyHeuristics disabled set', () => {
+	it('skips a heuristic whose slug is disabled', () => {
+		const text = 'It is not an emotion. It is a settled trust.';
+		const sentences = splitSentencesWithOffsets(text);
+		const slugs = applyHeuristics(
+			text,
+			sentences,
+			new Set(['negation-assertion']),
+		).map((d) => d.ruleSlug);
+		expect(slugs).not.toContain('negation-assertion');
+	});
+});
+
 describe('negation-assertion', () => {
 	it('flags a negation set up to be corrected', () => {
 		const text = 'It is not an emotion. It is a settled trust.';

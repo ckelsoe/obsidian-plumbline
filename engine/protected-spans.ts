@@ -3,7 +3,12 @@ import { scriptureSpans, SCRIPTURE_SPAN_KIND } from './scripture';
 
 // The base protected-span sources every profile starts with. Packs contribute
 // more (scripture quotes, dialogue); a profile selects which are active.
-export const BASE_SPAN_KINDS = ['frontmatter', 'code', 'heading'] as const;
+export const BASE_SPAN_KINDS = [
+	'frontmatter',
+	'code',
+	'heading',
+	'html-comment',
+] as const;
 
 // Leading YAML frontmatter: `---` on the first line through the next `---` line.
 function frontmatterSpan(text: string): Span | null {
@@ -67,6 +72,25 @@ function inlineCodeSpans(text: string): Span[] {
 	return spans;
 }
 
+// HTML comments, `<!-- ... -->`, spanning one or more lines. This is also how
+// Annoteca stores every comment (`<!-- annoteca/<category>: [id=...] -->`), so
+// masking HTML comments keeps every rule and metric out of comment text and out
+// of another plugin's markers. The body is matched lazily so each `-->` closes
+// its own comment; an unterminated `<!--` is left unmasked rather than swallowing
+// the rest of the note while the writer is still typing it.
+function htmlCommentSpans(text: string): Span[] {
+	const spans: Span[] = [];
+	const re = /<!--[\s\S]*?-->/g;
+	for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+		spans.push({
+			start: m.index,
+			end: re.lastIndex,
+			kind: 'html-comment',
+		});
+	}
+	return spans;
+}
+
 // Merge overlapping or touching ranges into a sorted, non-overlapping list, so
 // callers can skip a position by scanning once. The earlier span's kind wins.
 function mergeSpans(spans: Span[]): Span[] {
@@ -103,6 +127,9 @@ export function protectedSpans(text: string, config: ResolvedConfig): Span[] {
 	}
 	if (kinds.has('code')) {
 		collected.push(...inlineCodeSpans(text));
+	}
+	if (kinds.has('html-comment')) {
+		collected.push(...htmlCommentSpans(text));
 	}
 	if (kinds.has(SCRIPTURE_SPAN_KIND)) {
 		collected.push(...scriptureSpans(text));

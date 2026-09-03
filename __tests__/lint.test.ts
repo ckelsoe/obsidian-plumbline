@@ -54,10 +54,31 @@ describe('lint diagnostics', () => {
 		expect(lint(text, config).diagnostics).toEqual([]);
 	});
 
+	it('does not flag phrases inside an HTML or Annoteca comment', () => {
+		const text =
+			'Clean prose here. <!-- annoteca/note: read that again --> More clean prose.';
+		expect(lint(text, config).diagnostics).toEqual([]);
+	});
+
 	it('has no diagnostics for clean prose', () => {
 		expect(
 			lint('He kept the promise he made.', config).diagnostics,
 		).toEqual([]);
+	});
+
+	it('does not fire a heuristic the vault config disables', () => {
+		const text = 'This shows the point.';
+		expect(lint(text, config).diagnostics.map((d) => d.ruleSlug)).toContain(
+			'demonstrative-opener',
+		);
+		const disabled = resolveConfig('scripture-book', {
+			disabledRules: ['demonstrative-opener'],
+			rules: [],
+			overrides: {},
+		});
+		expect(
+			lint(text, disabled).diagnostics.map((d) => d.ruleSlug),
+		).not.toContain('demonstrative-opener');
 	});
 });
 
