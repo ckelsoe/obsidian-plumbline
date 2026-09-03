@@ -1,9 +1,26 @@
 import { ResolvedConfig, Span } from './types';
 import { scriptureSpans, SCRIPTURE_SPAN_KIND } from './scripture';
 
+// The comment span kinds, split so a user can mask Annoteca's structural markers
+// independently of their own plain HTML comments (they are disjoint: an Annoteca
+// marker is never also counted as an other-HTML comment).
+export const ANNOTECA_COMMENT_KIND = 'annoteca-comment';
+export const HTML_COMMENT_KIND = 'html-comment';
+
 // The base protected-span sources every profile starts with. Packs contribute
 // more (scripture quotes, dialogue); a profile selects which are active.
-export const BASE_SPAN_KINDS = ['frontmatter', 'code', 'heading'] as const;
+export const BASE_SPAN_KINDS = [
+	'frontmatter',
+	'code',
+	'heading',
+	ANNOTECA_COMMENT_KIND,
+	HTML_COMMENT_KIND,
+] as const;
+
+// Annoteca serializes every comment as `<!-- annoteca/<category>: ... -->`. Match
+// that opener exactly (case-sensitive, like Annoteca's own grammar) so its markers
+// can be masked apart from plain HTML comments.
+const ANNOTECA_OPENER = /^<!--\s*annoteca\//;
 
 // Leading YAML frontmatter: `---` on the first line through the next `---` line.
 function frontmatterSpan(text: string): Span | null {
@@ -67,6 +84,32 @@ function inlineCodeSpans(text: string): Span[] {
 	return spans;
 }
 
+// HTML comments, `<!-- ... -->`, spanning one or more lines. Each comment is
+// tagged as an Annoteca marker or a plain HTML comment, so the two can be masked
+// independently. The body is matched lazily so each `-->` closes its own comment;
+// an unterminated `<!--` is left unmasked rather than swallowing the rest of the
+// note while the writer is still typing it. `wantAnnoteca`/`wantHtml` select which
+// kinds to emit, so a disabled kind is never collected.
+function commentSpans(
+	text: string,
+	wantAnnoteca: boolean,
+	wantHtml: boolean,
+): Span[] {
+	const spans: Span[] = [];
+	const re = /<!--[\s\S]*?-->/g;
+	for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+		const isAnnoteca = ANNOTECA_OPENER.test(m[0]);
+		if (isAnnoteca ? wantAnnoteca : wantHtml) {
+			spans.push({
+				start: m.index,
+				end: re.lastIndex,
+				kind: isAnnoteca ? ANNOTECA_COMMENT_KIND : HTML_COMMENT_KIND,
+			});
+		}
+	}
+	return spans;
+}
+
 // Merge overlapping or touching ranges into a sorted, non-overlapping list, so
 // callers can skip a position by scanning once. The earlier span's kind wins.
 function mergeSpans(spans: Span[]): Span[] {
@@ -103,6 +146,18 @@ export function protectedSpans(text: string, config: ResolvedConfig): Span[] {
 	}
 	if (kinds.has('code')) {
 		collected.push(...inlineCodeSpans(text));
+	}
+	const wantAnnoteca = kinds.has(ANNOTECA_COMMENT_KIND);
+	const wantHtml = kinds.has(HTML_COMMENT_KIND);
+	if (wantAnnoteca || wantHtml) {
+		// Scan for comments over text with the code, heading, and frontmatter
+		// spans already blanked, so a `<!--` or `-->` sitting inside code cannot
+		// pair with a delimiter in prose and swallow the text between them. Masking
+		// preserves length, so the match offsets still map onto the source.
+		const withoutProtected = maskSpans(text, mergeSpans(collected));
+		collected.push(
+			...commentSpans(withoutProtected, wantAnnoteca, wantHtml),
+		);
 	}
 	if (kinds.has(SCRIPTURE_SPAN_KIND)) {
 		collected.push(...scriptureSpans(text));

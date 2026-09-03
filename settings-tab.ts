@@ -12,12 +12,25 @@ import type PlumblinePlugin from './main';
 // invite expires after 7 days and would rot in a shipped release.
 const DISCORD_URL = 'https://discord.gg/gd6tKJDPj4';
 
+// Control keys for the per-rule and per-comment toggles are namespaced so
+// getControlValue and setControlValue can route them to the vault config instead
+// of plugin settings.
+const RULE_KEY_PREFIX = 'rule:';
+const SPAN_KEY_PREFIX = 'span:';
+
 // Built-in writing profiles. Each selects which rule packs are active and how
 // they are tuned. The full cascade lives in the project's dev docs; only the
 // scripture profile is implemented today.
 const PROFILE_OPTIONS: Record<string, string> = {
 	'scripture-book': 'Scripture-first book',
 };
+
+// Turn a rule slug into a readable, sentence-case label ('reader-direction' ->
+// 'Reader direction') for the settings list.
+function prettifySlug(slug: string): string {
+	const spaced = slug.replace(/-/g, ' ');
+	return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
 
 export class PlumblineSettingTab extends PluginSettingTab {
 	plugin: PlumblinePlugin;
@@ -45,6 +58,30 @@ export class PlumblineSettingTab extends PluginSettingTab {
 				],
 			},
 			{
+				type: 'group',
+				heading: 'Comments',
+				items: this.plugin.commentSpanStates().map((state) => ({
+					name: state.name,
+					desc: state.desc,
+					control: {
+						type: 'toggle' as const,
+						key: `${SPAN_KEY_PREFIX}${state.kind}`,
+					},
+				})),
+			},
+			{
+				type: 'group',
+				heading: 'Active rules',
+				items: this.plugin.profileRuleStates().map((state) => ({
+					name: prettifySlug(state.slug),
+					desc: state.message,
+					control: {
+						type: 'toggle' as const,
+						key: `${RULE_KEY_PREFIX}${state.slug}`,
+					},
+				})),
+			},
+			{
 				name: '',
 				searchable: false,
 				render: (setting: Setting) => {
@@ -54,18 +91,46 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		];
 	}
 
-	// Binds declarative control definitions to the plugin's own settings store,
-	// so a change persists through saveSettings().
+	// Binds declarative control definitions to their store. A `rule:` key reads
+	// from the vault config's disabled set; every other key is a plugin setting.
 	getControlValue(key: string): unknown {
+		if (key.startsWith(RULE_KEY_PREFIX)) {
+			const slug = key.slice(RULE_KEY_PREFIX.length);
+			return this.plugin
+				.profileRuleStates()
+				.some((state) => state.slug === slug && state.enabled);
+		}
+		if (key.startsWith(SPAN_KEY_PREFIX)) {
+			const kind = key.slice(SPAN_KEY_PREFIX.length);
+			return this.plugin
+				.commentSpanStates()
+				.some((state) => state.kind === kind && state.enabled);
+		}
 		return (this.plugin.settings as unknown as Record<string, unknown>)[
 			key
 		];
 	}
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (key.startsWith(RULE_KEY_PREFIX)) {
+			const slug = key.slice(RULE_KEY_PREFIX.length);
+			await this.plugin.setRuleEnabled(slug, Boolean(value));
+			return;
+		}
+		if (key.startsWith(SPAN_KEY_PREFIX)) {
+			const kind = key.slice(SPAN_KEY_PREFIX.length);
+			await this.plugin.setSpanKindEnabled(kind, Boolean(value));
+			return;
+		}
 		(this.plugin.settings as unknown as Record<string, unknown>)[key] =
 			value;
 		await this.plugin.saveSettings();
+		if (key === 'activeProfile') {
+			// A new profile has a different rule set, so re-analyze and rebuild
+			// the rules list below.
+			this.plugin.applyConfigChange();
+			this.update();
+		}
 	}
 
 	// Renders the version + links footer into a trailing settings row. Each

@@ -5,12 +5,13 @@
 
 export type Severity = 'error' | 'warning' | 'suggestion';
 
-// A run of text that every rule skips: quoted scripture, code, headings, and
-// frontmatter. Produced by the protected-span pass before any rule runs.
+// A run of text that every rule skips: quoted scripture, code, headings,
+// frontmatter, and comments. Produced by the protected-span pass before any rule
+// runs.
 export interface Span {
 	start: number; // inclusive UTF-16 offset
 	end: number; // exclusive UTF-16 offset
-	kind: string; // 'frontmatter' | 'code' | 'heading' | (pack-contributed)
+	kind: string; // 'frontmatter' | 'code' | 'heading' | 'annoteca-comment' | 'html-comment' | (pack-contributed)
 }
 
 // One finding. `start`/`end` locate it in the source; `packId` and `ruleSlug`
@@ -61,4 +62,7 @@ export interface ResolvedConfig {
 	profileId: string;
 	protectedSpanKinds: string[];
 	rules: Rule[];
+	// Slugs the user disabled. Mechanical rules are already dropped from `rules`;
+	// the heuristics run separately and consult this set so they can be toggled too.
+	disabledSlugs: string[];
 }

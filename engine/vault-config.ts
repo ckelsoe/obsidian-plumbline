@@ -14,12 +14,16 @@ export interface RuleOverride {
 
 export interface VaultConfig {
 	disabledRules: string[];
+	// Protected-span kinds the user turned off, so a rule can once again fire
+	// inside them (the comment kinds are the ones exposed as toggles).
+	disabledSpanKinds: string[];
 	rules: Rule[];
 	overrides: Record<string, RuleOverride>;
 }
 
 export const EMPTY_VAULT_CONFIG: VaultConfig = {
 	disabledRules: [],
+	disabledSpanKinds: [],
 	rules: [],
 	overrides: {},
 };
@@ -99,6 +103,7 @@ export function parseVaultConfig(raw: unknown): VaultConfig {
 	const obj = raw as Record<string, unknown>;
 	return {
 		disabledRules: asStringArray(obj.disabledRules),
+		disabledSpanKinds: asStringArray(obj.disabledSpanKinds),
 		rules: Array.isArray(obj.rules)
 			? obj.rules.map(asRule).filter((r): r is Rule => r !== null)
 			: [],

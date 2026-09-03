@@ -24,7 +24,7 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 	};
 	const diagnostics = [
 		...applyRules(prose, config.rules),
-		...applyHeuristics(prose, sentences),
+		...applyHeuristics(prose, sentences, new Set(config.disabledSlugs)),
 	];
 	diagnostics.sort((a, b) => a.start - b.start || a.end - b.end);
 	return { diagnostics, metrics, spans };

@@ -2,7 +2,7 @@ import { MarkdownView, Notice, Plugin, WorkspaceLeaf } from 'obsidian';
 import { PlumblineSettingTab } from './settings-tab';
 import { AnalysisService } from './analysis-service';
 import { rhythmStatusText, rhythmDetail } from './rhythm-format';
-import { plumblineDecorations } from './editor-decorations';
+import { plumblineDecorations, relintEditor } from './editor-decorations';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
 import { LintResult, ResolvedConfig } from './engine/types';
 import { buildReport } from './report';
@@ -12,12 +12,30 @@ import { verseMatches } from './engine/verbatim';
 import { summarizeCaps } from './engine/verse-caps';
 import { kdpDisclosure } from './engine/kdp';
 import { CorpusService } from './corpus-service';
-import { resolveConfig } from './engine/config';
+import {
+	COMMENT_SPAN_KINDS,
+	SpanKindInfo,
+	profileRuleInfos,
+	RuleInfo,
+	resolveConfig,
+} from './engine/config';
 import {
 	VaultConfig,
 	EMPTY_VAULT_CONFIG,
 	parseVaultConfig,
 } from './engine/vault-config';
+
+// One built-in rule (mechanical or heuristic), paired with whether the vault
+// config currently has it on. Drives the settings list so a rule can be toggled
+// without hand-editing JSON.
+interface RuleState extends RuleInfo {
+	enabled: boolean;
+}
+
+// One toggleable comment span kind, paired with whether masking is currently on.
+interface SpanKindState extends SpanKindInfo {
+	enabled: boolean;
+}
 
 export interface PlumblineSettings {
 	// The active profile selects which rule packs are on and how they are tuned.
@@ -45,6 +63,9 @@ export default class PlumblinePlugin extends Plugin {
 	private lastResult: LintResult | null = null;
 	private lastView: MarkdownView | null = null;
 	private vaultConfig: VaultConfig = EMPTY_VAULT_CONFIG;
+	// Serializes config writes so two quick toggles cannot interleave their
+	// read-modify-write of the file and drop one.
+	private saveQueue: Promise<void> = Promise.resolve();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -195,8 +216,144 @@ export default class PlumblinePlugin extends Plugin {
 
 	private async reloadVaultConfig(): Promise<void> {
 		await this.loadVaultConfig();
-		this.refresh();
+		this.applyConfigChange();
 		new Notice('Plumbline: reloaded config.');
+	}
+
+	// The built-in rules for the active profile, mechanical and heuristic, each
+	// paired with whether the vault config currently has it enabled. The settings
+	// tab renders this.
+	profileRuleStates(): RuleState[] {
+		const disabled = new Set(this.vaultConfig.disabledRules);
+		return profileRuleInfos(this.settings.activeProfile).map((info) => ({
+			...info,
+			enabled: !disabled.has(info.slug),
+		}));
+	}
+
+	// Add or remove an id from a disabled list, returning the new array. The one
+	// place the enable/disable set arithmetic lives, for both rules and span kinds.
+	private static toggledList(
+		list: string[],
+		id: string,
+		enabled: boolean,
+	): string[] {
+		const set = new Set(list);
+		if (enabled) {
+			set.delete(id);
+		} else {
+			set.add(id);
+		}
+		return [...set];
+	}
+
+	// Apply a single on/off toggle to one of the vault config's disabled lists,
+	// serialized through the save queue, then re-analyze so it shows in the editor,
+	// panel, and status bar at once.
+	private async persistToggle(
+		field: 'disabledRules' | 'disabledSpanKinds',
+		id: string,
+		enabled: boolean,
+	): Promise<void> {
+		this.saveQueue = this.saveQueue.then(() =>
+			this.writeToggle(field, id, enabled),
+		);
+		await this.saveQueue;
+		this.applyConfigChange();
+	}
+
+	// Toggle one built-in rule on or off in the vault config's disabled list.
+	async setRuleEnabled(slug: string, enabled: boolean): Promise<void> {
+		await this.persistToggle('disabledRules', slug, enabled);
+	}
+
+	// The toggleable comment span kinds, each paired with whether masking is on.
+	// The settings tab renders this.
+	commentSpanStates(): SpanKindState[] {
+		const disabled = new Set(this.vaultConfig.disabledSpanKinds);
+		return COMMENT_SPAN_KINDS.map((info) => ({
+			...info,
+			enabled: !disabled.has(info.kind),
+		}));
+	}
+
+	// Toggle masking of one comment kind on or off.
+	async setSpanKindEnabled(kind: string, enabled: boolean): Promise<void> {
+		await this.persistToggle('disabledSpanKinds', kind, enabled);
+	}
+
+	// Read the current config, apply one toggle to the named disabled list, and
+	// write it back, preserving every other field. If the file exists but is not a
+	// JSON object (mid hand-edit, an array, or otherwise malformed), abort with a
+	// notice rather than overwrite and lose the author's content. The toggle is
+	// applied to the freshly read list, so a concurrent edit to the other list or
+	// to any other field survives. Never throws, so the save queue keeps draining.
+	private async writeToggle(
+		field: 'disabledRules' | 'disabledSpanKinds',
+		id: string,
+		enabled: boolean,
+	): Promise<void> {
+		try {
+			const dir = '.plumbline';
+			const path = `${dir}/config.json`;
+			const adapter = this.app.vault.adapter;
+			let raw: Record<string, unknown> = {};
+			if (await adapter.exists(path)) {
+				let parsed: unknown;
+				try {
+					parsed = JSON.parse(await adapter.read(path));
+				} catch (err) {
+					console.error(err);
+					new Notice(
+						'Plumbline: config.json is not valid JSON; left it untouched.',
+					);
+					return;
+				}
+				if (
+					typeof parsed !== 'object' ||
+					parsed === null ||
+					Array.isArray(parsed)
+				) {
+					new Notice(
+						'Plumbline: config.json is not a JSON object; left it untouched.',
+					);
+					return;
+				}
+				raw = parsed as Record<string, unknown>;
+			} else if (!(await adapter.exists(dir))) {
+				await adapter.mkdir(dir);
+			}
+			const fresh = parseVaultConfig(raw);
+			const current =
+				field === 'disabledRules'
+					? fresh.disabledRules
+					: fresh.disabledSpanKinds;
+			raw[field] = PlumblinePlugin.toggledList(current, id, enabled);
+			this.vaultConfig = parseVaultConfig(raw);
+			await adapter.write(path, JSON.stringify(raw, null, 2));
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not save the config.');
+		}
+	}
+
+	// Re-run analysis everywhere after the active config changes (profile switch,
+	// rule toggle, config reload): status bar, findings panel, and the editor's
+	// live underlines.
+	applyConfigChange(): void {
+		this.refresh();
+		// Re-lint every open Markdown editor, not just the active one, since the
+		// change affects all of them. In reading view the CodeMirror editor may not
+		// be mounted, so guard the handle.
+		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+			const view = leaf.view;
+			if (view instanceof MarkdownView) {
+				const cm = view.editor.cm;
+				if (cm) {
+					relintEditor(cm);
+				}
+			}
+		}
 	}
 
 	private async activateFindingsView(): Promise<void> {

@@ -1,61 +1,105 @@
-import { Extension, Range } from '@codemirror/state';
+import { Extension, StateEffect } from '@codemirror/state';
+import { EditorView, ViewUpdate } from '@codemirror/view';
 import {
-	Decoration,
-	DecorationSet,
-	EditorView,
-	ViewPlugin,
-	ViewUpdate,
-} from '@codemirror/view';
+	Diagnostic as CmDiagnostic,
+	forceLinting,
+	linter,
+	lintGutter,
+} from '@codemirror/lint';
 import { lint } from './engine/lint';
 import { ResolvedConfig, Severity } from './engine/types';
 
-function markFor(severity: Severity, message: string): Decoration {
-	return Decoration.mark({
-		class: `plumbline-flag plumbline-flag-${severity}`,
-		attributes: { title: message },
-	});
-}
+// Dispatched to an editor when the plugin config changes (profile switch, rule
+// toggle, config reload). The linter watches for it through `needsRefresh` so the
+// underlines re-run against the new config, which `forceLinting` alone cannot do
+// once the initial lint has settled.
+const configChanged = StateEffect.define<null>();
 
-function buildDecorations(
-	view: EditorView,
-	config: ResolvedConfig,
-): DecorationSet {
-	const result = lint(view.state.doc.toString(), config);
-	const docLength = view.state.doc.length;
-	const ranges: Range<Decoration>[] = [];
-	for (const d of result.diagnostics) {
-		if (d.end > d.start && d.end <= docLength) {
-			ranges.push(markFor(d.severity, d.message).range(d.start, d.end));
-		}
+// Map the engine's severities onto CodeMirror's. 'suggestion' has no exact CM
+// equivalent, so it uses 'info', the lowest-urgency mark CM styles.
+function cmSeverity(severity: Severity): CmDiagnostic['severity'] {
+	if (severity === 'error') {
+		return 'error';
 	}
-	// Decoration.set sorts and tolerates overlapping marks, unlike RangeSetBuilder.
-	return Decoration.set(ranges, true);
+	if (severity === 'warning') {
+		return 'warning';
+	}
+	return 'info';
 }
 
-// A CodeMirror view plugin that underlines every flagged phrase in the active
-// editor and shows the rule message on hover. It rebuilds when the document
-// changes; `getConfig` is read on each build so the active profile and any vault
-// overrides are current.
+// A short, human label for the severity, shown as a colored tag in the tooltip so
+// a reader can tell the issue types apart when several stack on the same text.
+function severityLabel(severity: Severity): string {
+	if (severity === 'error') {
+		return 'Error';
+	}
+	if (severity === 'warning') {
+		return 'Warning';
+	}
+	return 'Suggestion';
+}
+
+// Build the tooltip content for one finding: a colored severity tag and the rule
+// message, in place of CodeMirror's plain unlabeled text. When several findings
+// share a range CodeMirror stacks these, so each is labeled and readable.
+function renderFinding(severity: Severity, message: string): HTMLElement {
+	const el = createDiv({ cls: 'plumbline-lint-item' });
+	el.createSpan({
+		cls: `plumbline-lint-tag plumbline-lint-tag-${severity}`,
+		text: severityLabel(severity),
+	});
+	el.createSpan({ cls: 'plumbline-lint-text', text: message });
+	return el;
+}
+
+// Debounce for live re-linting while typing, matched to the plugin's refresh.
+const LINT_DELAY = 400;
+
+// Run the engine through CodeMirror's lint system. Unlike a bare decoration with
+// a `title` attribute, this gives a real hover tooltip carrying the rule message,
+// a gutter marker per flagged line, and CM's own underline styling, so a flag is
+// discoverable instead of a silent squiggle. `getConfig` is read on each run so
+// the active profile and any vault overrides are current.
 export function plumblineDecorations(
 	getConfig: () => ResolvedConfig,
 ): Extension {
-	return ViewPlugin.fromClass(
-		class {
-			decorations: DecorationSet;
-
-			constructor(view: EditorView) {
-				this.decorations = buildDecorations(view, getConfig());
+	const source = (view: EditorView): CmDiagnostic[] => {
+		const result = lint(view.state.doc.toString(), getConfig());
+		const docLength = view.state.doc.length;
+		const diagnostics: CmDiagnostic[] = [];
+		for (const d of result.diagnostics) {
+			if (d.end > d.start && d.end <= docLength) {
+				const severity = d.severity;
+				const message = d.message;
+				diagnostics.push({
+					from: d.start,
+					to: d.end,
+					severity: cmSeverity(severity),
+					message,
+					// Scope the underline to this plugin so styles.css can make it
+					// visible without recoloring every CodeMirror lint mark.
+					markClass: `plumbline-flag plumbline-flag-${severity}`,
+					// Render a labeled, readable message instead of CodeMirror's
+					// plain unlabeled text.
+					renderMessage: () => renderFinding(severity, message),
+				});
 			}
+		}
+		return diagnostics;
+	};
+	const needsRefresh = (update: ViewUpdate): boolean =>
+		update.transactions.some((tr) =>
+			tr.effects.some((effect) => effect.is(configChanged)),
+		);
+	return [linter(source, { delay: LINT_DELAY, needsRefresh }), lintGutter()];
+}
 
-			update(update: ViewUpdate): void {
-				if (update.docChanged) {
-					this.decorations = buildDecorations(
-						update.view,
-						getConfig(),
-					);
-				}
-			}
-		},
-		{ decorations: (plugin) => plugin.decorations },
-	);
+// Re-run the linter now, without waiting for the next edit. Called when the
+// config changes (profile switch, rule toggle, config reload) so the editor
+// underlines update at once rather than on the next keystroke. The dispatched
+// effect makes the linter treat the config as changed (via needsRefresh);
+// forceLinting then runs that scheduled pass immediately.
+export function relintEditor(view: EditorView): void {
+	view.dispatch({ effects: configChanged.of(null) });
+	forceLinting(view);
 }
