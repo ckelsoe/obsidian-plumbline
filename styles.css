@@ -74,33 +74,40 @@
 	border-bottom: 2px solid var(--text-accent);
 }
 
-.cm-lintRange.plumbline-flag-error {
-	border-bottom-color: var(--text-error);
+/* Severity colors, ordered least to most severe. When several findings share a
+   range CodeMirror applies every class to the one span, so source order decides
+   the color: defining error last means the worst severity wins the underline. */
+.cm-lintRange.plumbline-flag-suggestion {
+	border-bottom-color: var(--text-accent);
 }
 
 .cm-lintRange.plumbline-flag-warning {
 	border-bottom-color: var(--text-warning);
 }
 
-.cm-lintRange.plumbline-flag-suggestion {
-	border-bottom-color: var(--text-accent);
+.cm-lintRange.plumbline-flag-error {
+	border-bottom-color: var(--text-error);
 }
 
 /* The lint hover tooltip. CodeMirror's hover-tooltip container renders as a light
    box (about #f5f5f5) with no theme colors, so on a dark theme the message is
    unreadable. The lint message (`.cm-tooltip-lint`) is a transparent child of that
    container, so the container is what must be themed. It carries CodeMirror hover
-   tooltips, which in this plugin's context are the lint messages. */
+   tooltips, which in this plugin's context are the lint messages. min-width stops
+   it collapsing into a narrow, tall column. */
 .cm-tooltip.cm-tooltip-hover {
 	background-color: var(--background-secondary);
 	color: var(--text-normal);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
-	max-width: 340px;
+	min-width: 240px;
+	max-width: 360px;
 }
 
-.cm-tooltip-lint .cm-diagnostic {
-	color: var(--text-normal);
+/* A divider between findings that stack on the same text, so several issues at one
+   spot read as several, not one run-on block. */
+.cm-tooltip-lint .cm-diagnostic + .cm-diagnostic {
+	border-top: 1px solid var(--background-modifier-border);
 }
 
 .cm-tooltip-lint .cm-diagnostic-error {
@@ -113,4 +120,30 @@
 
 .cm-tooltip-lint .cm-diagnostic-info {
 	border-left-color: var(--text-accent);
+}
+
+/* A rendered finding: a colored severity tag and the rule message. */
+.plumbline-lint-item {
+	white-space: normal;
+	color: var(--text-normal);
+}
+
+.plumbline-lint-tag {
+	margin-right: var(--size-4-1);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.plumbline-lint-tag-error {
+	color: var(--text-error);
+}
+
+.plumbline-lint-tag-warning {
+	color: var(--text-warning);
+}
+
+.plumbline-lint-tag-suggestion {
+	color: var(--text-accent);
 }

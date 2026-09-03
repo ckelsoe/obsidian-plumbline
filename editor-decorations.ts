@@ -27,6 +27,31 @@ function cmSeverity(severity: Severity): CmDiagnostic['severity'] {
 	return 'info';
 }
 
+// A short, human label for the severity, shown as a colored tag in the tooltip so
+// a reader can tell the issue types apart when several stack on the same text.
+function severityLabel(severity: Severity): string {
+	if (severity === 'error') {
+		return 'Error';
+	}
+	if (severity === 'warning') {
+		return 'Warning';
+	}
+	return 'Suggestion';
+}
+
+// Build the tooltip content for one finding: a colored severity tag and the rule
+// message, in place of CodeMirror's plain unlabeled text. When several findings
+// share a range CodeMirror stacks these, so each is labeled and readable.
+function renderFinding(severity: Severity, message: string): HTMLElement {
+	const el = createDiv({ cls: 'plumbline-lint-item' });
+	el.createSpan({
+		cls: `plumbline-lint-tag plumbline-lint-tag-${severity}`,
+		text: severityLabel(severity),
+	});
+	el.createSpan({ cls: 'plumbline-lint-text', text: message });
+	return el;
+}
+
 // Debounce for live re-linting while typing, matched to the plugin's refresh.
 const LINT_DELAY = 400;
 
@@ -44,15 +69,19 @@ export function plumblineDecorations(
 		const diagnostics: CmDiagnostic[] = [];
 		for (const d of result.diagnostics) {
 			if (d.end > d.start && d.end <= docLength) {
+				const severity = d.severity;
+				const message = d.message;
 				diagnostics.push({
 					from: d.start,
 					to: d.end,
-					severity: cmSeverity(d.severity),
-					message: d.message,
-					source: 'Plumbline',
+					severity: cmSeverity(severity),
+					message,
 					// Scope the underline to this plugin so styles.css can make it
 					// visible without recoloring every CodeMirror lint mark.
-					markClass: `plumbline-flag plumbline-flag-${d.severity}`,
+					markClass: `plumbline-flag plumbline-flag-${severity}`,
+					// Render a labeled, readable message instead of CodeMirror's
+					// plain unlabeled text.
+					renderMessage: () => renderFinding(severity, message),
 				});
 			}
 		}
