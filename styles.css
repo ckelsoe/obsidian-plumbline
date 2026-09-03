@@ -64,46 +64,34 @@
 }
 
 /* The linter's own range mark is kept only so the hover tooltip has a target;
-   the visible underline is drawn by the stacked layer below. Hide CodeMirror's
+   the visible underline is drawn by the segment layer below. Hide CodeMirror's
    default wavy mark for this plugin's ranges. */
 .cm-lintRange.plumbline-flag {
 	background-image: none;
 	padding-bottom: 0;
 }
 
-/* Stacked underlines: one line per finding, drawn as a 2px background gradient at
-   the bottom of the text. Background has no layout effect, so nested overlapping
-   marks stack cleanly. The color is set by severity; the vertical row is set by
-   the layer, so a spot with two findings shows two lines and where one range ends
-   its line drops away. text-decoration is avoided because the marketplace CSS scan
-   flags its color and style sub-features. */
-.plumbline-ul {
-	background-repeat: no-repeat;
-	background-size: 100% 2px;
+/* Segment underlines: one line per coverage segment, colored by the worst
+   severity covering it. A segment covered by two or more findings uses a double
+   line so a denser spot is visibly different from a single-issue one; the line
+   height cannot fit several stacked lines, so density is shown by line style, not
+   by extra rows. border-bottom is used rather than a text-decoration color or
+   style, which the marketplace CSS scan flags. */
+.plumbline-mark {
+	border-bottom: 2px solid var(--text-accent);
 }
 
-.plumbline-ul-suggestion {
-	background-image: linear-gradient(var(--text-accent), var(--text-accent));
+.plumbline-mark-warning {
+	border-bottom-color: var(--text-warning);
 }
 
-.plumbline-ul-warning {
-	background-image: linear-gradient(var(--text-warning), var(--text-warning));
+.plumbline-mark-error {
+	border-bottom-color: var(--text-error);
 }
 
-.plumbline-ul-error {
-	background-image: linear-gradient(var(--text-error), var(--text-error));
-}
-
-.plumbline-ul-l0 {
-	background-position: 0 100%;
-}
-
-.plumbline-ul-l1 {
-	background-position: 0 calc(100% - 3px);
-}
-
-.plumbline-ul-l2 {
-	background-position: 0 calc(100% - 6px);
+.plumbline-mark-multi {
+	border-bottom-style: double;
+	border-bottom-width: 4px;
 }
 
 /* The lint hover tooltip. CodeMirror's hover-tooltip container renders as a light

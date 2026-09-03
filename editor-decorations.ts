@@ -14,17 +14,14 @@ import {
 } from '@codemirror/lint';
 import { lint } from './engine/lint';
 import { ResolvedConfig, Severity } from './engine/types';
-import { assignLayers } from './underline-layers';
+import { coverageSegments } from './underline-coverage';
 
 // Dispatched to an editor when the plugin config changes (profile switch, rule
 // toggle, config reload). The linter watches for it through `needsRefresh`, and
 // the underline layer watches for it in `update`, so both re-run against the new
 // config, which `forceLinting` alone cannot do once the initial lint has settled.
+// The segment-underline plugin also watches for it in `update`.
 const configChanged = StateEffect.define<null>();
-
-// Underlines stack up to this many rows. A finding assigned a deeper layer draws
-// on the top row; its message is still in the hover tooltip and the flags panel.
-const MAX_UNDERLINE_LAYERS = 3;
 
 // Map the engine's severities onto CodeMirror's. 'suggestion' has no exact CM
 // equivalent, so it uses 'info', the lowest-urgency mark CM styles.
@@ -66,10 +63,11 @@ function renderFinding(severity: Severity, message: string): HTMLElement {
 // Debounce for live re-linting while typing, matched to the plugin's refresh.
 const LINT_DELAY = 400;
 
-// The visible underlines: one per finding, stacked by layer so overlapping
-// findings read as separate lines (a spot with two issues shows two lines) rather
-// than one flat mark. Drawn with a background gradient, which has no layout
-// effect, so nested overlapping marks stack cleanly instead of shifting the text.
+// The visible underlines: one per coverage segment, colored by the worst severity
+// covering it, and drawn as a double underline where two or more findings overlap
+// so a denser spot is visibly different from a single-issue one. Segments never
+// overlap, so each is one clean mark and the line height (which cannot fit several
+// stacked lines) is not a constraint.
 function buildUnderlines(
 	view: EditorView,
 	getConfig: () => ResolvedConfig,
@@ -80,18 +78,18 @@ function buildUnderlines(
 		(d) => d.end > d.start && d.end <= docLength,
 	);
 	const ranges: Range<Decoration>[] = [];
-	for (const { diagnostic, layer } of assignLayers(inRange)) {
-		const row = Math.min(layer, MAX_UNDERLINE_LAYERS - 1);
+	for (const seg of coverageSegments(inRange)) {
+		const multi = seg.count >= 2 ? ' plumbline-mark-multi' : '';
 		ranges.push(
 			Decoration.mark({
-				class: `plumbline-ul plumbline-ul-${diagnostic.severity} plumbline-ul-l${row}`,
-			}).range(diagnostic.start, diagnostic.end),
+				class: `plumbline-mark plumbline-mark-${seg.severity}${multi}`,
+			}).range(seg.start, seg.end),
 		);
 	}
 	return Decoration.set(ranges, true);
 }
 
-function underlineLayer(getConfig: () => ResolvedConfig): Extension {
+function segmentUnderlines(getConfig: () => ResolvedConfig): Extension {
 	return ViewPlugin.fromClass(
 		class {
 			decorations: DecorationSet;
@@ -116,7 +114,7 @@ function underlineLayer(getConfig: () => ResolvedConfig): Extension {
 }
 
 // Run the engine through CodeMirror's lint system for the hover tooltip and gutter
-// marker, and draw the visible underlines as a separate stacked layer. The linter
+// marker, and draw the visible underlines as a separate segment layer. The linter
 // keeps its own range mark (hidden in styles.css) only so the tooltip has a target
 // to hover. `getConfig` is read on each run so the active profile and any vault
 // overrides are current.
@@ -136,9 +134,9 @@ export function plumblineDecorations(
 					to: d.end,
 					severity: cmSeverity(severity),
 					message,
-					// The mark is hidden; the visible underline is the stacked layer.
-					// This class only gives styles.css a hook to hide CodeMirror's
-					// default wavy mark for this plugin's ranges.
+					// The mark is hidden; the visible underline is the segment
+					// layer. This class only gives styles.css a hook to hide
+					// CodeMirror's default wavy mark for this plugin's ranges.
 					markClass: 'plumbline-flag',
 					// Render a labeled, readable message instead of CodeMirror's
 					// plain unlabeled text.
@@ -155,7 +153,7 @@ export function plumblineDecorations(
 	return [
 		linter(source, { delay: LINT_DELAY, needsRefresh }),
 		lintGutter(),
-		underlineLayer(getConfig),
+		segmentUnderlines(getConfig),
 	];
 }
 
