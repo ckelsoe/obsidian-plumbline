@@ -63,11 +63,6 @@ export default class PlumblinePlugin extends Plugin {
 	private lastResult: LintResult | null = null;
 	private lastView: MarkdownView | null = null;
 	private vaultConfig: VaultConfig = EMPTY_VAULT_CONFIG;
-	// The raw parsed JSON of the vault config, kept verbatim so a settings toggle
-	// rewrites only the lists it owns (`disabledRules`, `disabledSpanKinds`) and
-	// leaves every other hand-authored field (overrides, custom rules, anything the
-	// parser does not model yet) intact.
-	private vaultConfigRaw: Record<string, unknown> = {};
 	// Serializes config writes so two quick toggles cannot interleave their
 	// read-modify-write of the file and drop one.
 	private saveQueue: Promise<void> = Promise.resolve();
@@ -208,19 +203,14 @@ export default class PlumblinePlugin extends Plugin {
 			const adapter = this.app.vault.adapter;
 			if (!(await adapter.exists(path))) {
 				this.vaultConfig = EMPTY_VAULT_CONFIG;
-				this.vaultConfigRaw = {};
 				return;
 			}
-			const raw: unknown = JSON.parse(await adapter.read(path));
-			this.vaultConfigRaw =
-				typeof raw === 'object' && raw !== null
-					? (raw as Record<string, unknown>)
-					: {};
-			this.vaultConfig = parseVaultConfig(raw);
+			this.vaultConfig = parseVaultConfig(
+				JSON.parse(await adapter.read(path)) as unknown,
+			);
 		} catch (err) {
 			console.error(err);
 			this.vaultConfig = EMPTY_VAULT_CONFIG;
-			this.vaultConfigRaw = {};
 		}
 	}
 
@@ -257,24 +247,24 @@ export default class PlumblinePlugin extends Plugin {
 		return [...set];
 	}
 
-	// Persist the config and re-analyze everywhere, so a toggle shows in the
-	// editor, panel, and status bar at once.
-	private async persistAndApply(): Promise<void> {
-		await this.saveVaultConfig();
+	// Apply a single on/off toggle to one of the vault config's disabled lists,
+	// serialized through the save queue, then re-analyze so it shows in the editor,
+	// panel, and status bar at once.
+	private async persistToggle(
+		field: 'disabledRules' | 'disabledSpanKinds',
+		id: string,
+		enabled: boolean,
+	): Promise<void> {
+		this.saveQueue = this.saveQueue.then(() =>
+			this.writeToggle(field, id, enabled),
+		);
+		await this.saveQueue;
 		this.applyConfigChange();
 	}
 
 	// Toggle one built-in rule on or off in the vault config's disabled list.
 	async setRuleEnabled(slug: string, enabled: boolean): Promise<void> {
-		this.vaultConfig = {
-			...this.vaultConfig,
-			disabledRules: PlumblinePlugin.toggledList(
-				this.vaultConfig.disabledRules,
-				slug,
-				enabled,
-			),
-		};
-		await this.persistAndApply();
+		await this.persistToggle('disabledRules', slug, enabled);
 	}
 
 	// The toggleable comment span kinds, each paired with whether masking is on.
@@ -289,56 +279,56 @@ export default class PlumblinePlugin extends Plugin {
 
 	// Toggle masking of one comment kind on or off.
 	async setSpanKindEnabled(kind: string, enabled: boolean): Promise<void> {
-		this.vaultConfig = {
-			...this.vaultConfig,
-			disabledSpanKinds: PlumblinePlugin.toggledList(
-				this.vaultConfig.disabledSpanKinds,
-				kind,
-				enabled,
-			),
-		};
-		await this.persistAndApply();
+		await this.persistToggle('disabledSpanKinds', kind, enabled);
 	}
 
-	// Persist the vault config, serialized through the save queue so overlapping
-	// toggles apply in order rather than racing on the same file.
-	private async saveVaultConfig(): Promise<void> {
-		this.saveQueue = this.saveQueue.then(() => this.writeVaultConfig());
-		await this.saveQueue;
-	}
-
-	// Write the vault config back to disk, rewriting only `disabledRules`. The
-	// file is re-read first, so a hand-edit or sync since load is preserved rather
-	// than clobbered by a stale in-memory snapshot, and every other field (custom
-	// rules, overrides, anything the parser does not model) is left as authored.
-	// Never throws, so a failure does not wedge the save queue.
-	private async writeVaultConfig(): Promise<void> {
+	// Read the current config, apply one toggle to the named disabled list, and
+	// write it back, preserving every other field. If the file exists but is not a
+	// JSON object (mid hand-edit, an array, or otherwise malformed), abort with a
+	// notice rather than overwrite and lose the author's content. The toggle is
+	// applied to the freshly read list, so a concurrent edit to the other list or
+	// to any other field survives. Never throws, so the save queue keeps draining.
+	private async writeToggle(
+		field: 'disabledRules' | 'disabledSpanKinds',
+		id: string,
+		enabled: boolean,
+	): Promise<void> {
 		try {
 			const dir = '.plumbline';
 			const path = `${dir}/config.json`;
 			const adapter = this.app.vault.adapter;
 			let raw: Record<string, unknown> = {};
 			if (await adapter.exists(path)) {
+				let parsed: unknown;
 				try {
-					const parsed: unknown = JSON.parse(
-						await adapter.read(path),
-					);
-					if (typeof parsed === 'object' && parsed !== null) {
-						raw = parsed as Record<string, unknown>;
-					}
+					parsed = JSON.parse(await adapter.read(path));
 				} catch (err) {
-					// A malformed file on disk is not a reason to lose the toggle;
-					// start from an empty object and rewrite it cleanly.
 					console.error(err);
+					new Notice(
+						'Plumbline: config.json is not valid JSON; left it untouched.',
+					);
+					return;
 				}
+				if (
+					typeof parsed !== 'object' ||
+					parsed === null ||
+					Array.isArray(parsed)
+				) {
+					new Notice(
+						'Plumbline: config.json is not a JSON object; left it untouched.',
+					);
+					return;
+				}
+				raw = parsed as Record<string, unknown>;
 			} else if (!(await adapter.exists(dir))) {
 				await adapter.mkdir(dir);
 			}
-			raw.disabledRules = this.vaultConfig.disabledRules;
-			raw.disabledSpanKinds = this.vaultConfig.disabledSpanKinds;
-			this.vaultConfigRaw = raw;
-			// Keep the in-memory config consistent with the merged file, so any
-			// external overrides or custom rules take effect from now on too.
+			const fresh = parseVaultConfig(raw);
+			const current =
+				field === 'disabledRules'
+					? fresh.disabledRules
+					: fresh.disabledSpanKinds;
+			raw[field] = PlumblinePlugin.toggledList(current, id, enabled);
 			this.vaultConfig = parseVaultConfig(raw);
 			await adapter.write(path, JSON.stringify(raw, null, 2));
 		} catch (err) {

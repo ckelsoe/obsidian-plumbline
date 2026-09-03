@@ -100,6 +100,16 @@ describe('protectedSpans', () => {
 		expect(protectedSpans(text, config)).toEqual([]);
 	});
 
+	it('does not pair a comment delimiter inside code with one in prose', () => {
+		// `<!--` sits in inline code; a lone `-->` is in prose. They must not form
+		// a comment that masks the sentence between them.
+		const text = 'Use `<!--` in code. Keep this prose visible. -->';
+		const spans = protectedSpans(text, config);
+		expect(spans.filter((s) => s.kind === 'html-comment')).toHaveLength(0);
+		// The inline code is still protected on its own.
+		expect(spans.some((s) => s.kind === 'code')).toBe(true);
+	});
+
 	it('exposes the base span kinds', () => {
 		expect([...BASE_SPAN_KINDS]).toEqual([
 			'frontmatter',

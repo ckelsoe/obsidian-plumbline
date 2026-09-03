@@ -150,7 +150,14 @@ export function protectedSpans(text: string, config: ResolvedConfig): Span[] {
 	const wantAnnoteca = kinds.has(ANNOTECA_COMMENT_KIND);
 	const wantHtml = kinds.has(HTML_COMMENT_KIND);
 	if (wantAnnoteca || wantHtml) {
-		collected.push(...commentSpans(text, wantAnnoteca, wantHtml));
+		// Scan for comments over text with the code, heading, and frontmatter
+		// spans already blanked, so a `<!--` or `-->` sitting inside code cannot
+		// pair with a delimiter in prose and swallow the text between them. Masking
+		// preserves length, so the match offsets still map onto the source.
+		const withoutProtected = maskSpans(text, mergeSpans(collected));
+		collected.push(
+			...commentSpans(withoutProtected, wantAnnoteca, wantHtml),
+		);
 	}
 	if (kinds.has(SCRIPTURE_SPAN_KIND)) {
 		collected.push(...scriptureSpans(text));
