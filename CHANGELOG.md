@@ -33,4 +33,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Inline diagnostics now run through CodeMirror's lint system, so a flagged phrase shows an immediate hover tooltip with the rule message and a gutter marker, in place of the easy-to-miss native title tooltip. A profile switch or rule toggle re-lints every open editor at once.
-- Comments are no longer linted: HTML comments, including Annoteca's `<!-- annoteca/... -->` markers, are masked like code and headings, so no rule fires and no metric counts inside comment text.
+- Comments are no longer linted by default: HTML comments, including Annoteca's `<!-- annoteca/... -->` markers, are masked like code and headings, so no rule fires and no metric counts inside comment text. Two settings toggles, both on by default, control this: "Annoteca comments" and "Other HTML comments" are independent, so plain HTML comments can be prose-checked while Annoteca markup stays clean.

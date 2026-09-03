@@ -12,9 +12,11 @@ import type PlumblinePlugin from './main';
 // invite expires after 7 days and would rot in a shipped release.
 const DISCORD_URL = 'https://discord.gg/gd6tKJDPj4';
 
-// Control keys for the per-rule toggles are namespaced so getControlValue and
-// setControlValue can route them to the vault config instead of plugin settings.
+// Control keys for the per-rule and per-comment toggles are namespaced so
+// getControlValue and setControlValue can route them to the vault config instead
+// of plugin settings.
 const RULE_KEY_PREFIX = 'rule:';
+const SPAN_KEY_PREFIX = 'span:';
 
 // Built-in writing profiles. Each selects which rule packs are active and how
 // they are tuned. The full cascade lives in the project's dev docs; only the
@@ -57,6 +59,18 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
+				heading: 'Comments',
+				items: this.plugin.commentSpanStates().map((state) => ({
+					name: state.name,
+					desc: state.desc,
+					control: {
+						type: 'toggle' as const,
+						key: `${SPAN_KEY_PREFIX}${state.kind}`,
+					},
+				})),
+			},
+			{
+				type: 'group',
 				heading: 'Active rules',
 				items: this.plugin.profileRuleStates().map((state) => ({
 					name: prettifySlug(state.slug),
@@ -86,6 +100,12 @@ export class PlumblineSettingTab extends PluginSettingTab {
 				.profileRuleStates()
 				.some((state) => state.slug === slug && state.enabled);
 		}
+		if (key.startsWith(SPAN_KEY_PREFIX)) {
+			const kind = key.slice(SPAN_KEY_PREFIX.length);
+			return this.plugin
+				.commentSpanStates()
+				.some((state) => state.kind === kind && state.enabled);
+		}
 		return (this.plugin.settings as unknown as Record<string, unknown>)[
 			key
 		];
@@ -95,6 +115,11 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		if (key.startsWith(RULE_KEY_PREFIX)) {
 			const slug = key.slice(RULE_KEY_PREFIX.length);
 			await this.plugin.setRuleEnabled(slug, Boolean(value));
+			return;
+		}
+		if (key.startsWith(SPAN_KEY_PREFIX)) {
+			const kind = key.slice(SPAN_KEY_PREFIX.length);
+			await this.plugin.setSpanKindEnabled(kind, Boolean(value));
 			return;
 		}
 		(this.plugin.settings as unknown as Record<string, unknown>)[key] =

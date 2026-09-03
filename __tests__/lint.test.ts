@@ -60,6 +60,26 @@ describe('lint diagnostics', () => {
 		expect(lint(text, config).diagnostics).toEqual([]);
 	});
 
+	it('lints plain HTML comments when that masking is off, Annoteca still masked', () => {
+		const cfg = resolveConfig('scripture-book', {
+			disabledRules: [],
+			disabledSpanKinds: ['html-comment'],
+			rules: [],
+			overrides: {},
+		});
+		expect(
+			lint('<!-- read that again -->', cfg).diagnostics.map(
+				(d) => d.ruleSlug,
+			),
+		).toContain('reader-direction');
+		expect(
+			lint(
+				'<!-- annoteca/note: read that again -->',
+				cfg,
+			).diagnostics.map((d) => d.ruleSlug),
+		).not.toContain('reader-direction');
+	});
+
 	it('has no diagnostics for clean prose', () => {
 		expect(
 			lint('He kept the promise he made.', config).diagnostics,
@@ -73,6 +93,7 @@ describe('lint diagnostics', () => {
 		);
 		const disabled = resolveConfig('scripture-book', {
 			disabledRules: ['demonstrative-opener'],
+			disabledSpanKinds: [],
 			rules: [],
 			overrides: {},
 		});

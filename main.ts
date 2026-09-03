@@ -12,7 +12,13 @@ import { verseMatches } from './engine/verbatim';
 import { summarizeCaps } from './engine/verse-caps';
 import { kdpDisclosure } from './engine/kdp';
 import { CorpusService } from './corpus-service';
-import { profileRuleInfos, RuleInfo, resolveConfig } from './engine/config';
+import {
+	COMMENT_SPAN_KINDS,
+	SpanKindInfo,
+	profileRuleInfos,
+	RuleInfo,
+	resolveConfig,
+} from './engine/config';
 import {
 	VaultConfig,
 	EMPTY_VAULT_CONFIG,
@@ -23,6 +29,11 @@ import {
 // config currently has it on. Drives the settings list so a rule can be toggled
 // without hand-editing JSON.
 interface RuleState extends RuleInfo {
+	enabled: boolean;
+}
+
+// One toggleable comment span kind, paired with whether masking is currently on.
+interface SpanKindState extends SpanKindInfo {
 	enabled: boolean;
 }
 
@@ -53,8 +64,9 @@ export default class PlumblinePlugin extends Plugin {
 	private lastView: MarkdownView | null = null;
 	private vaultConfig: VaultConfig = EMPTY_VAULT_CONFIG;
 	// The raw parsed JSON of the vault config, kept verbatim so a settings toggle
-	// rewrites only `disabledRules` and leaves every other hand-authored field
-	// (overrides, custom rules, anything the parser does not model yet) intact.
+	// rewrites only the lists it owns (`disabledRules`, `disabledSpanKinds`) and
+	// leaves every other hand-authored field (overrides, custom rules, anything the
+	// parser does not model yet) intact.
 	private vaultConfigRaw: Record<string, unknown> = {};
 	// Serializes config writes so two quick toggles cannot interleave their
 	// read-modify-write of the file and drop one.
@@ -229,22 +241,63 @@ export default class PlumblinePlugin extends Plugin {
 		}));
 	}
 
-	// Toggle one built-in rule on or off by adding or removing its slug from the
-	// vault config's disabled list, persist it, and re-analyze so the editor,
-	// panel, and status bar all reflect the change at once.
-	async setRuleEnabled(slug: string, enabled: boolean): Promise<void> {
-		const disabled = new Set(this.vaultConfig.disabledRules);
+	// Add or remove an id from a disabled list, returning the new array. The one
+	// place the enable/disable set arithmetic lives, for both rules and span kinds.
+	private static toggledList(
+		list: string[],
+		id: string,
+		enabled: boolean,
+	): string[] {
+		const set = new Set(list);
 		if (enabled) {
-			disabled.delete(slug);
+			set.delete(id);
 		} else {
-			disabled.add(slug);
+			set.add(id);
 		}
-		this.vaultConfig = {
-			...this.vaultConfig,
-			disabledRules: [...disabled],
-		};
+		return [...set];
+	}
+
+	// Persist the config and re-analyze everywhere, so a toggle shows in the
+	// editor, panel, and status bar at once.
+	private async persistAndApply(): Promise<void> {
 		await this.saveVaultConfig();
 		this.applyConfigChange();
+	}
+
+	// Toggle one built-in rule on or off in the vault config's disabled list.
+	async setRuleEnabled(slug: string, enabled: boolean): Promise<void> {
+		this.vaultConfig = {
+			...this.vaultConfig,
+			disabledRules: PlumblinePlugin.toggledList(
+				this.vaultConfig.disabledRules,
+				slug,
+				enabled,
+			),
+		};
+		await this.persistAndApply();
+	}
+
+	// The toggleable comment span kinds, each paired with whether masking is on.
+	// The settings tab renders this.
+	commentSpanStates(): SpanKindState[] {
+		const disabled = new Set(this.vaultConfig.disabledSpanKinds);
+		return COMMENT_SPAN_KINDS.map((info) => ({
+			...info,
+			enabled: !disabled.has(info.kind),
+		}));
+	}
+
+	// Toggle masking of one comment kind on or off.
+	async setSpanKindEnabled(kind: string, enabled: boolean): Promise<void> {
+		this.vaultConfig = {
+			...this.vaultConfig,
+			disabledSpanKinds: PlumblinePlugin.toggledList(
+				this.vaultConfig.disabledSpanKinds,
+				kind,
+				enabled,
+			),
+		};
+		await this.persistAndApply();
 	}
 
 	// Persist the vault config, serialized through the save queue so overlapping
@@ -282,6 +335,7 @@ export default class PlumblinePlugin extends Plugin {
 				await adapter.mkdir(dir);
 			}
 			raw.disabledRules = this.vaultConfig.disabledRules;
+			raw.disabledSpanKinds = this.vaultConfig.disabledSpanKinds;
 			this.vaultConfigRaw = raw;
 			// Keep the in-memory config consistent with the merged file, so any
 			// external overrides or custom rules take effect from now on too.

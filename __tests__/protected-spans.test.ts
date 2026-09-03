@@ -55,6 +55,31 @@ describe('protectedSpans', () => {
 		]);
 	});
 
+	it('tags an Annoteca marker as its own kind', () => {
+		const text = 'Before <!-- annoteca/note: x --> after.';
+		const spans = protectedSpans(text, config);
+		expect(spans).toHaveLength(1);
+		expect(spans[0]?.kind).toBe('annoteca-comment');
+	});
+
+	it('masks Annoteca markers even when other HTML comments are off', () => {
+		const text = 'A <!-- annoteca/note: x --> B <!-- plain --> C';
+		const spans = protectedSpans(text, {
+			...config,
+			protectedSpanKinds: ['annoteca-comment'],
+		});
+		expect(spans.map((s) => s.kind)).toEqual(['annoteca-comment']);
+	});
+
+	it('masks a plain HTML comment even when Annoteca masking is off', () => {
+		const text = 'A <!-- annoteca/note: x --> B <!-- plain --> C';
+		const spans = protectedSpans(text, {
+			...config,
+			protectedSpanKinds: ['html-comment'],
+		});
+		expect(spans.map((s) => s.kind)).toEqual(['html-comment']);
+	});
+
 	it('detects a multi-line HTML comment including its lines', () => {
 		const text = 'Intro.\n<!--\nhidden\n-->\nAfter.';
 		expect(protectedSpans(text, config)).toEqual([
@@ -80,6 +105,7 @@ describe('protectedSpans', () => {
 			'frontmatter',
 			'code',
 			'heading',
+			'annoteca-comment',
 			'html-comment',
 		]);
 	});

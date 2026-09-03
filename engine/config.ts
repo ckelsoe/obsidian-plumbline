@@ -1,5 +1,9 @@
 import { ResolvedConfig, Rule, Severity } from './types';
-import { BASE_SPAN_KINDS } from './protected-spans';
+import {
+	BASE_SPAN_KINDS,
+	ANNOTECA_COMMENT_KIND,
+	HTML_COMMENT_KIND,
+} from './protected-spans';
 import { BASE_RULES } from './packs';
 import { SCRIPTURE_SPAN_KIND, SCRIPTURE_RULES } from './scripture';
 import { HEURISTIC_RULES } from './heuristics';
@@ -18,6 +22,28 @@ export interface RuleInfo {
 	severity: Severity;
 	message: string;
 }
+
+// One toggleable protected-span kind, for the settings list. Only the comment
+// kinds are user-facing; code, heading, and frontmatter masking stay always on,
+// since a rule firing inside code or a heading is never wanted.
+export interface SpanKindInfo {
+	kind: string;
+	name: string;
+	desc: string;
+}
+
+export const COMMENT_SPAN_KINDS: SpanKindInfo[] = [
+	{
+		kind: ANNOTECA_COMMENT_KIND,
+		name: 'Annoteca comments',
+		desc: "Skip text inside Annoteca's comment markers.",
+	},
+	{
+		kind: HTML_COMMENT_KIND,
+		name: 'Other HTML comments',
+		desc: 'Skip text inside plain HTML comments.',
+	},
+];
 
 // The built-in mechanical rules a profile activates, before any vault config is
 // applied. Exported as its own step rather than being inlined into resolveConfig.
@@ -64,7 +90,10 @@ export function resolveConfig(
 	profileId: string,
 	vaultConfig?: VaultConfig,
 ): ResolvedConfig {
-	const protectedSpanKinds = profileSpanKinds(profileId);
+	const disabledKinds = new Set(vaultConfig?.disabledSpanKinds ?? []);
+	const protectedSpanKinds = profileSpanKinds(profileId).filter(
+		(kind) => !disabledKinds.has(kind),
+	);
 	let rules = profileRules(profileId);
 	if (vaultConfig) {
 		rules = mergeRules(rules, vaultConfig);

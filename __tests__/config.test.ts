@@ -36,12 +36,30 @@ describe('profileRuleInfos', () => {
 	});
 });
 
+describe('resolveConfig disabledSpanKinds', () => {
+	it('drops a comment span kind the vault config disables', () => {
+		expect(resolveConfig('scripture-book').protectedSpanKinds).toContain(
+			'html-comment',
+		);
+		const off = resolveConfig('scripture-book', {
+			disabledRules: [],
+			disabledSpanKinds: ['html-comment'],
+			rules: [],
+			overrides: {},
+		});
+		expect(off.protectedSpanKinds).not.toContain('html-comment');
+		// The Annoteca kind is independent and stays on.
+		expect(off.protectedSpanKinds).toContain('annoteca-comment');
+	});
+});
+
 describe('resolveConfig disabledSlugs', () => {
 	it('is empty with no vault config and carries the disabled list otherwise', () => {
 		expect(resolveConfig('scripture-book').disabledSlugs).toEqual([]);
 		expect(
 			resolveConfig('scripture-book', {
 				disabledRules: ['negation-assertion'],
+				disabledSpanKinds: [],
 				rules: [],
 				overrides: {},
 			}).disabledSlugs,
@@ -57,6 +75,7 @@ describe('resolveConfig with a vault config', () => {
 		);
 		const withoutRule = resolveConfig('scripture-book', {
 			disabledRules: ['reader-direction'],
+			disabledSpanKinds: [],
 			rules: [],
 			overrides: {},
 		});

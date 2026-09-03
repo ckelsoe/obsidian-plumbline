@@ -6,12 +6,12 @@
 export type Severity = 'error' | 'warning' | 'suggestion';
 
 // A run of text that every rule skips: quoted scripture, code, headings,
-// frontmatter, and HTML comments. Produced by the protected-span pass before any
-// rule runs.
+// frontmatter, and comments. Produced by the protected-span pass before any rule
+// runs.
 export interface Span {
 	start: number; // inclusive UTF-16 offset
 	end: number; // exclusive UTF-16 offset
-	kind: string; // 'frontmatter' | 'code' | 'heading' | 'html-comment' | (pack-contributed)
+	kind: string; // 'frontmatter' | 'code' | 'heading' | 'annoteca-comment' | 'html-comment' | (pack-contributed)
 }
 
 // One finding. `start`/`end` locate it in the source; `packId` and `ruleSlug`
