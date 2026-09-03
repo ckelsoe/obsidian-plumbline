@@ -62,3 +62,55 @@
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 }
+
+/* Inline lint underline, scoped to this plugin's marks via markClass so it is
+   visible on the theme background without recoloring other plugins' lint marks.
+   CodeMirror's default info underline is a faint wavy image, invisible on a dark
+   theme. A border-bottom is used rather than a text-decoration color or style,
+   which the marketplace CSS scan flags. */
+.cm-lintRange.plumbline-flag {
+	background-image: none;
+	padding-bottom: 0;
+	border-bottom: 2px solid var(--text-accent);
+}
+
+.cm-lintRange.plumbline-flag-error {
+	border-bottom-color: var(--text-error);
+}
+
+.cm-lintRange.plumbline-flag-warning {
+	border-bottom-color: var(--text-warning);
+}
+
+.cm-lintRange.plumbline-flag-suggestion {
+	border-bottom-color: var(--text-accent);
+}
+
+/* The lint hover tooltip. CodeMirror's hover-tooltip container renders as a light
+   box (about #f5f5f5) with no theme colors, so on a dark theme the message is
+   unreadable. The lint message (`.cm-tooltip-lint`) is a transparent child of that
+   container, so the container is what must be themed. It carries CodeMirror hover
+   tooltips, which in this plugin's context are the lint messages. */
+.cm-tooltip.cm-tooltip-hover {
+	background-color: var(--background-secondary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	max-width: 340px;
+}
+
+.cm-tooltip-lint .cm-diagnostic {
+	color: var(--text-normal);
+}
+
+.cm-tooltip-lint .cm-diagnostic-error {
+	border-left-color: var(--text-error);
+}
+
+.cm-tooltip-lint .cm-diagnostic-warning {
+	border-left-color: var(--text-warning);
+}
+
+.cm-tooltip-lint .cm-diagnostic-info {
+	border-left-color: var(--text-accent);
+}

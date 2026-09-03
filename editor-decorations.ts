@@ -50,6 +50,9 @@ export function plumblineDecorations(
 					severity: cmSeverity(d.severity),
 					message: d.message,
 					source: 'Plumbline',
+					// Scope the underline to this plugin so styles.css can make it
+					// visible without recoloring every CodeMirror lint mark.
+					markClass: `plumbline-flag plumbline-flag-${d.severity}`,
 				});
 			}
 		}
