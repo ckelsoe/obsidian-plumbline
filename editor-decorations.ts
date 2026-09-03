@@ -1,5 +1,11 @@
-import { Extension, StateEffect } from '@codemirror/state';
-import { EditorView, ViewUpdate } from '@codemirror/view';
+import { Extension, Range, StateEffect } from '@codemirror/state';
+import {
+	Decoration,
+	DecorationSet,
+	EditorView,
+	ViewPlugin,
+	ViewUpdate,
+} from '@codemirror/view';
 import {
 	Diagnostic as CmDiagnostic,
 	forceLinting,
@@ -8,12 +14,17 @@ import {
 } from '@codemirror/lint';
 import { lint } from './engine/lint';
 import { ResolvedConfig, Severity } from './engine/types';
+import { assignLayers } from './underline-layers';
 
 // Dispatched to an editor when the plugin config changes (profile switch, rule
-// toggle, config reload). The linter watches for it through `needsRefresh` so the
-// underlines re-run against the new config, which `forceLinting` alone cannot do
-// once the initial lint has settled.
+// toggle, config reload). The linter watches for it through `needsRefresh`, and
+// the underline layer watches for it in `update`, so both re-run against the new
+// config, which `forceLinting` alone cannot do once the initial lint has settled.
 const configChanged = StateEffect.define<null>();
+
+// Underlines stack up to this many rows. A finding assigned a deeper layer draws
+// on the top row; its message is still in the hover tooltip and the flags panel.
+const MAX_UNDERLINE_LAYERS = 3;
 
 // Map the engine's severities onto CodeMirror's. 'suggestion' has no exact CM
 // equivalent, so it uses 'info', the lowest-urgency mark CM styles.
@@ -55,11 +66,60 @@ function renderFinding(severity: Severity, message: string): HTMLElement {
 // Debounce for live re-linting while typing, matched to the plugin's refresh.
 const LINT_DELAY = 400;
 
-// Run the engine through CodeMirror's lint system. Unlike a bare decoration with
-// a `title` attribute, this gives a real hover tooltip carrying the rule message,
-// a gutter marker per flagged line, and CM's own underline styling, so a flag is
-// discoverable instead of a silent squiggle. `getConfig` is read on each run so
-// the active profile and any vault overrides are current.
+// The visible underlines: one per finding, stacked by layer so overlapping
+// findings read as separate lines (a spot with two issues shows two lines) rather
+// than one flat mark. Drawn with a background gradient, which has no layout
+// effect, so nested overlapping marks stack cleanly instead of shifting the text.
+function buildUnderlines(
+	view: EditorView,
+	getConfig: () => ResolvedConfig,
+): DecorationSet {
+	const result = lint(view.state.doc.toString(), getConfig());
+	const docLength = view.state.doc.length;
+	const inRange = result.diagnostics.filter(
+		(d) => d.end > d.start && d.end <= docLength,
+	);
+	const ranges: Range<Decoration>[] = [];
+	for (const { diagnostic, layer } of assignLayers(inRange)) {
+		const row = Math.min(layer, MAX_UNDERLINE_LAYERS - 1);
+		ranges.push(
+			Decoration.mark({
+				class: `plumbline-ul plumbline-ul-${diagnostic.severity} plumbline-ul-l${row}`,
+			}).range(diagnostic.start, diagnostic.end),
+		);
+	}
+	return Decoration.set(ranges, true);
+}
+
+function underlineLayer(getConfig: () => ResolvedConfig): Extension {
+	return ViewPlugin.fromClass(
+		class {
+			decorations: DecorationSet;
+
+			constructor(view: EditorView) {
+				this.decorations = buildUnderlines(view, getConfig);
+			}
+
+			update(update: ViewUpdate): void {
+				if (
+					update.docChanged ||
+					update.transactions.some((tr) =>
+						tr.effects.some((effect) => effect.is(configChanged)),
+					)
+				) {
+					this.decorations = buildUnderlines(update.view, getConfig);
+				}
+			}
+		},
+		{ decorations: (plugin) => plugin.decorations },
+	);
+}
+
+// Run the engine through CodeMirror's lint system for the hover tooltip and gutter
+// marker, and draw the visible underlines as a separate stacked layer. The linter
+// keeps its own range mark (hidden in styles.css) only so the tooltip has a target
+// to hover. `getConfig` is read on each run so the active profile and any vault
+// overrides are current.
 export function plumblineDecorations(
 	getConfig: () => ResolvedConfig,
 ): Extension {
@@ -76,9 +136,10 @@ export function plumblineDecorations(
 					to: d.end,
 					severity: cmSeverity(severity),
 					message,
-					// Scope the underline to this plugin so styles.css can make it
-					// visible without recoloring every CodeMirror lint mark.
-					markClass: `plumbline-flag plumbline-flag-${severity}`,
+					// The mark is hidden; the visible underline is the stacked layer.
+					// This class only gives styles.css a hook to hide CodeMirror's
+					// default wavy mark for this plugin's ranges.
+					markClass: 'plumbline-flag',
 					// Render a labeled, readable message instead of CodeMirror's
 					// plain unlabeled text.
 					renderMessage: () => renderFinding(severity, message),
@@ -91,14 +152,18 @@ export function plumblineDecorations(
 		update.transactions.some((tr) =>
 			tr.effects.some((effect) => effect.is(configChanged)),
 		);
-	return [linter(source, { delay: LINT_DELAY, needsRefresh }), lintGutter()];
+	return [
+		linter(source, { delay: LINT_DELAY, needsRefresh }),
+		lintGutter(),
+		underlineLayer(getConfig),
+	];
 }
 
-// Re-run the linter now, without waiting for the next edit. Called when the
-// config changes (profile switch, rule toggle, config reload) so the editor
-// underlines update at once rather than on the next keystroke. The dispatched
-// effect makes the linter treat the config as changed (via needsRefresh);
-// forceLinting then runs that scheduled pass immediately.
+// Re-run the linter and underlines now, without waiting for the next edit. Called
+// when the config changes (profile switch, rule toggle, config reload) so the
+// editor updates at once rather than on the next keystroke. The dispatched effect
+// makes the linter treat the config as changed (via needsRefresh) and drives the
+// underline layer's update; forceLinting then runs the linter pass immediately.
 export function relintEditor(view: EditorView): void {
 	view.dispatch({ effects: configChanged.of(null) });
 	forceLinting(view);

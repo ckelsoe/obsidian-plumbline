@@ -63,30 +63,47 @@
 	font-size: var(--font-ui-smaller);
 }
 
-/* Inline lint underline, scoped to this plugin's marks via markClass so it is
-   visible on the theme background without recoloring other plugins' lint marks.
-   CodeMirror's default info underline is a faint wavy image, invisible on a dark
-   theme. A border-bottom is used rather than a text-decoration color or style,
-   which the marketplace CSS scan flags. */
+/* The linter's own range mark is kept only so the hover tooltip has a target;
+   the visible underline is drawn by the stacked layer below. Hide CodeMirror's
+   default wavy mark for this plugin's ranges. */
 .cm-lintRange.plumbline-flag {
 	background-image: none;
 	padding-bottom: 0;
-	border-bottom: 2px solid var(--text-accent);
 }
 
-/* Severity colors, ordered least to most severe. When several findings share a
-   range CodeMirror applies every class to the one span, so source order decides
-   the color: defining error last means the worst severity wins the underline. */
-.cm-lintRange.plumbline-flag-suggestion {
-	border-bottom-color: var(--text-accent);
+/* Stacked underlines: one line per finding, drawn as a 2px background gradient at
+   the bottom of the text. Background has no layout effect, so nested overlapping
+   marks stack cleanly. The color is set by severity; the vertical row is set by
+   the layer, so a spot with two findings shows two lines and where one range ends
+   its line drops away. text-decoration is avoided because the marketplace CSS scan
+   flags its color and style sub-features. */
+.plumbline-ul {
+	background-repeat: no-repeat;
+	background-size: 100% 2px;
 }
 
-.cm-lintRange.plumbline-flag-warning {
-	border-bottom-color: var(--text-warning);
+.plumbline-ul-suggestion {
+	background-image: linear-gradient(var(--text-accent), var(--text-accent));
 }
 
-.cm-lintRange.plumbline-flag-error {
-	border-bottom-color: var(--text-error);
+.plumbline-ul-warning {
+	background-image: linear-gradient(var(--text-warning), var(--text-warning));
+}
+
+.plumbline-ul-error {
+	background-image: linear-gradient(var(--text-error), var(--text-error));
+}
+
+.plumbline-ul-l0 {
+	background-position: 0 100%;
+}
+
+.plumbline-ul-l1 {
+	background-position: 0 calc(100% - 3px);
+}
+
+.plumbline-ul-l2 {
+	background-position: 0 calc(100% - 6px);
 }
 
 /* The lint hover tooltip. CodeMirror's hover-tooltip container renders as a light
