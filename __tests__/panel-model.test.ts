@@ -271,3 +271,35 @@ describe('sectionSummary is not affected by the cap or the floor', () => {
 		expect(s && sectionSummary(s)).toBe('1 warning, 3 suggestions');
 	});
 });
+
+// An occurrence belongs to exactly one paragraph. Assigning by overlap put a
+// range crossing a blank line into both, duplicating its row and counting it
+// twice across two summaries. Reachable because a paragraph without terminal
+// punctuation lets a sentence run past the blank line, and several heuristics
+// flag the whole sentence.
+describe('buildPanelModel: an occurrence lands in one paragraph only', () => {
+	it('does not duplicate a finding that spans a paragraph break', () => {
+		const spanning: Finding = {
+			ruleSlug: 'wide',
+			packId: 'base',
+			severity: 'warning',
+			message: 'spans the break',
+			// Starts in paragraph one, ends inside paragraph two.
+			occurrences: [{ start: 5, end: P2_START + 10 }],
+			confidence: CONFIDENCE.heuristic,
+			priority: 0,
+			rolledUp: false,
+		};
+		const m = buildPanelModel(TEXT, [spanning]);
+		expect(m.sections).toHaveLength(1);
+		expect(m.sections[0]?.paragraph).toBe(1);
+		expect(m.sections[0]?.counts.warning).toBe(1);
+	});
+
+	it('still places an occurrence that starts in the second paragraph', () => {
+		const m = buildPanelModel(TEXT, [
+			finding('b', 'warning', [P2_START + 2]),
+		]);
+		expect(m.sections.map((s) => s.paragraph)).toEqual([2]);
+	});
+});

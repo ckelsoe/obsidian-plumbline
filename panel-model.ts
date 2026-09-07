@@ -92,8 +92,14 @@ export function buildPanelModel(
 		const rows: PanelRow[] = [];
 		const collapsed: PanelRow[] = [];
 		for (const finding of findings) {
+			// Assigned by START, so an occurrence belongs to exactly one
+			// paragraph. Overlap put a range crossing a blank line into BOTH,
+			// duplicating its row and double-counting it in two summaries. That
+			// is reachable rather than theoretical: a paragraph without terminal
+			// punctuation lets a sentence continue past the blank line, and
+			// several heuristics flag the whole sentence.
 			const here = finding.occurrences.filter(
-				(o) => o.start < para.end && o.end > para.start,
+				(o) => o.start >= para.start && o.start < para.end,
 			);
 			if (here.length === 0) continue;
 			const row = rowFor(finding, here);
