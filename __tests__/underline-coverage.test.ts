@@ -1,4 +1,4 @@
-import { coverageSegments, coveringIntersection } from '../underline-coverage';
+import { coverageSegments, segmentAt } from '../underline-coverage';
 import { Diagnostic, Severity } from '../engine/types';
 
 function diag(
@@ -53,51 +53,57 @@ describe('coverageSegments', () => {
 	});
 });
 
-describe('coveringIntersection', () => {
-	// The case that motivated it. CodeMirror keeps a hover alive while the
-	// pointer is inside the returned range, so a union would keep one popup up
-	// across text a different subset of findings covers.
-	it('returns the overlap of partially overlapping findings, not the union', () => {
-		expect(
-			coveringIntersection([
-				{ start: 0, end: 10 },
-				{ start: 5, end: 15 },
-			]),
-		).toEqual({ start: 5, end: 10 });
+describe('segmentAt', () => {
+	const d = (start: number, end: number): Diagnostic => ({
+		ruleSlug: 'r',
+		packId: 'p',
+		severity: 'warning',
+		message: 'm',
+		start,
+		end,
 	});
 
-	it('returns the narrowest range when one finding contains another', () => {
-		expect(
-			coveringIntersection([
-				{ start: 0, end: 20 },
-				{ start: 8, end: 12 },
-			]),
-		).toEqual({ start: 8, end: 12 });
-	});
-
-	it('returns a single finding unchanged', () => {
-		expect(coveringIntersection([{ start: 3, end: 9 }])).toEqual({
-			start: 3,
-			end: 9,
+	// The union of the findings covering pos would be [0,15), so moving to 12
+	// would keep a popup up that only the second finding explains.
+	it('stops at the boundary of an overlapping finding', () => {
+		expect(segmentAt([d(0, 10), d(5, 15)], 7)).toMatchObject({
+			start: 5,
+			end: 10,
 		});
 	});
 
-	// The invariant the hover relies on: callers pass only findings containing
-	// the hovered position, so that position is always inside the result.
-	it('keeps the hovered position inside the result', () => {
-		const pos = 7;
-		const covering = [
-			{ start: 0, end: 10 },
-			{ start: 5, end: 15 },
-			{ start: 6, end: 8 },
-		].filter((d) => pos >= d.start && pos < d.end);
-		const r = coveringIntersection(covering);
-		expect(r).not.toBeNull();
-		expect(r!.start).toBeLessThanOrEqual(pos);
-		expect(r!.end).toBeGreaterThan(pos);
+	// The intersection of the findings covering pos would be [5,10), which spans
+	// the start of [8,9) and would keep showing two messages at position 8.
+	it('stops at the boundary of a finding that does not cover pos', () => {
+		expect(segmentAt([d(0, 10), d(5, 15), d(8, 9)], 6)).toMatchObject({
+			start: 5,
+			end: 8,
+		});
 	});
 
-	it('has no intersection for an empty list', () => {
-		expect(coveringIntersection([])).toBeNull();
+	it('returns the segment a single finding covers', () => {
+		expect(segmentAt([d(3, 9)], 5)).toMatchObject({ start: 3, end: 9 });
+	});
+
+	it('treats the end offset as exclusive', () => {
+		expect(segmentAt([d(3, 9)], 8)).not.toBeNull();
+		expect(segmentAt([d(3, 9)], 9)).toBeNull();
+	});
+
+	it('returns null where nothing covers the position', () => {
+		expect(segmentAt([d(3, 9)], 1)).toBeNull();
+		expect(segmentAt([], 0)).toBeNull();
+	});
+
+	// The invariant the hover depends on: the popup's range always contains the
+	// position it was built for.
+	it('always contains the position it was asked about', () => {
+		for (const pos of [5, 6, 7, 8, 9, 12]) {
+			const seg = segmentAt([d(0, 10), d(5, 15), d(8, 9)], pos);
+			if (seg !== null) {
+				expect(seg.start).toBeLessThanOrEqual(pos);
+				expect(seg.end).toBeGreaterThan(pos);
+			}
+		}
 	});
 });

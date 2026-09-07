@@ -20,7 +20,7 @@ import {
 } from '@codemirror/view';
 import { lint } from './engine/lint';
 import { Diagnostic, ResolvedConfig, Severity } from './engine/types';
-import { coverageSegments, coveringIntersection } from './underline-coverage';
+import { coverageSegments, segmentAt } from './underline-coverage';
 import { summarizeSeverities } from './gutter-summary';
 
 // This plugin owns every surface it draws, and shares none of them.
@@ -227,18 +227,23 @@ function findingsHover(): Extension {
 			// `end - 1`. With `pos <= d.end` two adjacent findings both matched
 			// at their shared boundary, and the popup showed both messages over a
 			// span covering both ranges when only the second is under the pointer.
-			const covering = findingsIn(view.state).filter(
-				(d) => pos >= d.start && pos < d.end,
-			);
-			if (covering.length === 0) {
+			// The coverage segment under the pointer bounds the popup, and the
+			// findings spanning that whole segment are its contents. CodeMirror keeps
+			// a tooltip alive while the pointer stays inside the range returned here
+			// and only re-runs this source once it leaves, so the range has to be the
+			// exact stretch over which these messages stay true. Segments are split on
+			// every finding boundary, so crossing into a different set of findings
+			// leaves the segment and rebuilds the popup. See segmentAt.
+			const all = findingsIn(view.state);
+			const seg = segmentAt(all, pos);
+			if (seg === null) {
 				return null;
 			}
-			// Bounded to the stretch this exact set of findings answers for, so
-			// CodeMirror re-runs this source when the pointer crosses into a
-			// different set. See coveringIntersection for why the union is wrong.
-			const range = coveringIntersection(covering);
-			const start = range?.start ?? pos;
-			const end = range?.end ?? pos;
+			const covering = all.filter(
+				(d) => d.start <= seg.start && d.end >= seg.end,
+			);
+			const start = seg.start;
+			const end = seg.end;
 			return {
 				pos: start,
 				end,

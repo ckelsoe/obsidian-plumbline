@@ -22,7 +22,9 @@ const SEVERITY_RANK: Record<Severity, number> = {
 // them. Segments never overlap, so each renders as one underline: no nesting, and
 // the count and color are known per stretch of text. Pure, so it is unit-tested
 // apart from the CodeMirror rendering.
-export function coverageSegments(diagnostics: Diagnostic[]): CoverageSegment[] {
+export function coverageSegments(
+	diagnostics: readonly Diagnostic[],
+): CoverageSegment[] {
 	const points = [
 		...new Set(diagnostics.flatMap((d) => [d.start, d.end])),
 	].sort((a, b) => a - b);
@@ -47,34 +49,35 @@ export function coverageSegments(diagnostics: Diagnostic[]): CoverageSegment[] {
 	return segments;
 }
 
-// The stretch over which a given set of findings is the whole answer: the
-// INTERSECTION of their ranges, not the union.
+// The coverage segment containing `pos`, or null if no finding covers it.
 //
 // Used to bound the hover popup. CodeMirror keeps a tooltip alive while the
 // pointer stays inside the range the hover source returned, and only re-runs the
-// source once it leaves. Returning the union means a popup built at one position
-// stays up, with its original contents, across text that a different subset of
-// findings covers. Findings [0,10) and [5,15) hovered at 7 would return [0,15),
-// so moving to 12 kept showing both messages when only the second covers it.
+// source once it leaves, so that range has to be the exact stretch over which the
+// popup's contents stay true.
 //
-// The intersection is the same unit coverageSegments draws, which is why the
-// underline and the popup agree about where one answer stops and the next begins.
+// The segment is that stretch, and nothing narrower is needed or wider is safe.
+// Two weaker answers were tried and are wrong:
 //
-// Callers pass only findings that already contain the hovered position, so the
-// result always contains it: the largest start is at most that position and the
-// smallest end is past it. An empty list has no intersection and returns null.
-export function coveringIntersection(
-	diagnostics: readonly { start: number; end: number }[],
-): { start: number; end: number } | null {
-	const first = diagnostics[0];
-	if (first === undefined) {
-		return null;
+//   - The UNION of the findings covering `pos`. Findings [0,10) and [5,15)
+//     hovered at 7 give [0,15), so moving to 12 keeps showing both messages when
+//     only the second covers it.
+//   - Their INTERSECTION. Better, but it only knows about findings that cover
+//     `pos`, so it can still span another finding's boundary: hovering 6 with
+//     [0,10), [5,15) and [8,9) gives [5,10), and moving to 8 keeps showing two
+//     messages when three findings apply.
+//
+// Segments are split on EVERY finding boundary, so the segment containing `pos`
+// cannot contain one. It is also the unit the underline draws, which is why the
+// popup and the mark under it agree about where one answer stops.
+export function segmentAt(
+	diagnostics: readonly Diagnostic[],
+	pos: number,
+): CoverageSegment | null {
+	for (const seg of coverageSegments(diagnostics)) {
+		if (pos >= seg.start && pos < seg.end) {
+			return seg;
+		}
 	}
-	let start = first.start;
-	let end = first.end;
-	for (const d of diagnostics) {
-		start = Math.max(start, d.start);
-		end = Math.min(end, d.end);
-	}
-	return { start, end };
+	return null;
 }
