@@ -46,3 +46,35 @@ export function coverageSegments(diagnostics: Diagnostic[]): CoverageSegment[] {
 	}
 	return segments;
 }
+
+// The stretch over which a given set of findings is the whole answer: the
+// INTERSECTION of their ranges, not the union.
+//
+// Used to bound the hover popup. CodeMirror keeps a tooltip alive while the
+// pointer stays inside the range the hover source returned, and only re-runs the
+// source once it leaves. Returning the union means a popup built at one position
+// stays up, with its original contents, across text that a different subset of
+// findings covers. Findings [0,10) and [5,15) hovered at 7 would return [0,15),
+// so moving to 12 kept showing both messages when only the second covers it.
+//
+// The intersection is the same unit coverageSegments draws, which is why the
+// underline and the popup agree about where one answer stops and the next begins.
+//
+// Callers pass only findings that already contain the hovered position, so the
+// result always contains it: the largest start is at most that position and the
+// smallest end is past it. An empty list has no intersection and returns null.
+export function coveringIntersection(
+	diagnostics: readonly { start: number; end: number }[],
+): { start: number; end: number } | null {
+	const first = diagnostics[0];
+	if (first === undefined) {
+		return null;
+	}
+	let start = first.start;
+	let end = first.end;
+	for (const d of diagnostics) {
+		start = Math.max(start, d.start);
+		end = Math.min(end, d.end);
+	}
+	return { start, end };
+}

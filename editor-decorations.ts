@@ -20,7 +20,7 @@ import {
 } from '@codemirror/view';
 import { lint } from './engine/lint';
 import { Diagnostic, ResolvedConfig, Severity } from './engine/types';
-import { coverageSegments } from './underline-coverage';
+import { coverageSegments, coveringIntersection } from './underline-coverage';
 import { summarizeSeverities } from './gutter-summary';
 
 // This plugin owns every surface it draws, and shares none of them.
@@ -233,12 +233,12 @@ function findingsHover(): Extension {
 			if (covering.length === 0) {
 				return null;
 			}
-			let start = covering[0]?.start ?? pos;
-			let end = covering[0]?.end ?? pos;
-			for (const d of covering) {
-				start = Math.min(start, d.start);
-				end = Math.max(end, d.end);
-			}
+			// Bounded to the stretch this exact set of findings answers for, so
+			// CodeMirror re-runs this source when the pointer crosses into a
+			// different set. See coveringIntersection for why the union is wrong.
+			const range = coveringIntersection(covering);
+			const start = range?.start ?? pos;
+			const end = range?.end ?? pos;
 			return {
 				pos: start,
 				end,
