@@ -5,6 +5,7 @@ function result(metrics: Metrics, flags = 0): LintResult {
 	return {
 		metrics,
 		spans: [],
+		findings: [],
 		diagnostics: Array.from({ length: flags }, (_, i) => ({
 			ruleSlug: 'reader-direction',
 			severity: 'warning' as const,

@@ -8,6 +8,7 @@ import { BASE_RULES } from './packs';
 import { SCRIPTURE_SPAN_KIND, SCRIPTURE_RULES } from './scripture';
 import { HEURISTIC_RULES } from './heuristics';
 import { VaultConfig, mergeRules } from './vault-config';
+import { DEFAULT_ROLLUP_THRESHOLD } from './rollup';
 
 // The profile whose packs include scripture. Until the full pack and profile
 // cascade lands (see config-model.md), profiles are resolved here directly.
@@ -103,5 +104,8 @@ export function resolveConfig(
 		protectedSpanKinds,
 		rules,
 		disabledSlugs: vaultConfig ? [...vaultConfig.disabledRules] : [],
+		rollupThreshold:
+			vaultConfig?.rollupThreshold ?? DEFAULT_ROLLUP_THRESHOLD,
+		confidenceBySlug: { ...(vaultConfig?.confidence ?? {}) },
 	};
 }
