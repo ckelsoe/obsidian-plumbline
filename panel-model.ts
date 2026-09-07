@@ -116,24 +116,35 @@ export function buildPanelModel(
 		const kept = rows.slice(0, budget);
 		hidden += rows.length - kept.length;
 		shown += kept.length;
+		// A collapsed group that does not fit is DROPPED from the section, not
+		// merely counted as hidden. Counting it and returning it anyway let the
+		// renderer draw the button and its rows regardless, so a note whose
+		// findings are suggestions across many paragraphs rendered well past the
+		// cap while also offering a "Show N more" that was already showing them.
+		const fitsCollapsed = collapsed.length > 0 && shown < cap;
 		if (collapsed.length > 0) {
-			if (shown < cap) {
+			if (fitsCollapsed) {
 				shown += 1;
 			} else {
 				hidden += 1;
 			}
 		}
-		if (kept.length === 0 && collapsed.length === 0) continue;
+		if (kept.length === 0 && !fitsCollapsed) continue;
 
 		sections.push({
 			paragraph: i + 1,
 			start: para.start,
 			end: para.end,
 			rows: kept,
-			collapsed: {
-				count: collapsed.reduce((n, r) => n + r.occurrences.length, 0),
-				rows: collapsed,
-			},
+			collapsed: fitsCollapsed
+				? {
+						count: collapsed.reduce(
+							(n, r) => n + r.occurrences.length,
+							0,
+						),
+						rows: collapsed,
+					}
+				: { count: 0, rows: [] },
 		});
 	}
 

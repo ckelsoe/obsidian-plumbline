@@ -3,7 +3,7 @@ import {
 	buildPanelModel,
 	sectionSummary,
 } from '../panel-model';
-import { CONFIDENCE } from '../engine/rollup';
+import { CONFIDENCE, priorityOf } from '../engine/rollup';
 import { Finding, Severity } from '../engine/types';
 
 // Two paragraphs, so grouping has something to group by. Offsets are what the
@@ -25,7 +25,11 @@ const finding = (
 	message: `${slug} message`,
 	occurrences: starts.map((s) => ({ start: s, end: s + 5 })),
 	confidence,
-	priority: 0,
+	// The real WHOLE-NOTE priority, not a placeholder. Zero here made the
+	// per-paragraph ranking test vacuous: every priority tied, the sort fell
+	// through to its alphabetical tiebreak, and it gave the expected order by
+	// luck whether or not the model recomputed anything. Caught by mutation.
+	priority: priorityOf(severity, starts.length, confidence),
 	rolledUp: starts.length > 4,
 });
 
@@ -186,5 +190,53 @@ describe('sectionSummary', () => {
 		const m = buildPanelModel(TEXT, [finding('s', 'suggestion', [0, 10])]);
 		const s = m.sections[0];
 		expect(s && sectionSummary(s)).toBe('2 suggestions');
+	});
+});
+
+// The cap has to bind on collapsed groups too. Counting one as hidden while
+// still returning it let the renderer draw its button and every row behind it,
+// so a note whose findings are all suggestions rendered well past the cap while
+// offering a "Show N more" for rows it was already showing.
+describe('buildPanelModel: the cap binds on collapsed groups', () => {
+	// One suggestion per paragraph, across many paragraphs: every section is a
+	// collapsed group and nothing else.
+	const manyParagraphs = (n: number) => {
+		const paras = Array.from(
+			{ length: n },
+			(_, i) => `Paragraph ${i} text.`,
+		);
+		const text = paras.join('\n\n');
+		const findings: Finding[] = paras.map((p, i) => {
+			const at = text.indexOf(p);
+			return finding(`s${i}`, 'suggestion', [at]);
+		});
+		return { text, findings };
+	};
+
+	it('stops returning collapsed groups once the cap is reached', () => {
+		const { text, findings } = manyParagraphs(10);
+		const m = buildPanelModel(text, findings, 4);
+		const drawn = m.sections.reduce(
+			(n, s) => n + s.rows.length + (s.collapsed.rows.length > 0 ? 1 : 0),
+			0,
+		);
+		expect(drawn).toBe(4);
+		expect(m.hidden).toBe(6);
+	});
+
+	// A section kept only for a group that did not fit would be an empty header.
+	it('drops a section whose only content did not fit', () => {
+		const { text, findings } = manyParagraphs(10);
+		const m = buildPanelModel(text, findings, 4);
+		for (const s of m.sections) {
+			expect(s.rows.length + s.collapsed.rows.length).toBeGreaterThan(0);
+		}
+	});
+
+	it('still returns every group when they all fit', () => {
+		const { text, findings } = manyParagraphs(3);
+		const m = buildPanelModel(text, findings, 25);
+		expect(m.sections).toHaveLength(3);
+		expect(m.hidden).toBe(0);
 	});
 });

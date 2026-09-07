@@ -61,7 +61,13 @@
 	margin-bottom: var(--size-4-3);
 }
 
+/* A <button>, so it is keyboard reachable; reset to look like the row it is. */
 .plumbline-section-head {
+	width: 100%;
+	background: transparent;
+	box-shadow: none;
+	font-size: inherit;
+	color: inherit;
 	display: flex;
 	justify-content: space-between;
 	gap: var(--size-4-2);

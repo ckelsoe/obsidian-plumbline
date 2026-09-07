@@ -23,6 +23,7 @@ export class FindingsView extends ItemView {
 	// it under them.
 	private readonly expanded = new Set<string>();
 	private showAll = false;
+	private targetPath: string | undefined;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PlumblinePlugin) {
 		super(leaf);
@@ -53,6 +54,18 @@ export class FindingsView extends ItemView {
 
 	// Called by the plugin when the active note's analysis changes.
 	update(result: LintResult, targetView: MarkdownView): void {
+		// Per NOTE, not per view. "Show more" and every expanded row are answers
+		// about the note the reader was looking at. Carrying them to the next note
+		// disables the row cap for the rest of the session, and leaves expansion
+		// keys pointing at offsets in a different document. Re-lints of the SAME
+		// note keep them, which is the case that matters: a list must not collapse
+		// under the reader because they typed.
+		const path = targetView.file?.path;
+		if (path !== this.targetPath) {
+			this.targetPath = path;
+			this.showAll = false;
+			this.expanded.clear();
+		}
 		this.result = result;
 		this.targetView = targetView;
 		this.render();
@@ -110,17 +123,27 @@ export class FindingsView extends ItemView {
 		docText: string,
 	): void {
 		const wrap = list.createDiv({ cls: 'plumbline-section' });
-		const head = wrap.createDiv({ cls: 'plumbline-section-head' });
+		// A real button, not a clickable div. It navigates, so it has to be
+		// reachable and activatable from the keyboard, and its accessible name has
+		// to carry what the two spans below say visually.
+		const summary = sectionSummary(section);
+		const head = wrap.createEl('button', {
+			cls: 'plumbline-section-head',
+			attr: {
+				type: 'button',
+				'aria-label': `Paragraph ${section.paragraph}: ${summary}`,
+			},
+		});
 		head.createSpan({
 			cls: 'plumbline-section-name',
 			text: `Paragraph ${section.paragraph}`,
 		});
 		head.createSpan({
 			cls: 'plumbline-section-summary',
-			text: sectionSummary(section),
+			text: summary,
 		});
-		// The header jumps to the paragraph, so a reader can go straight to the
-		// prose the summary is about without picking a row first.
+		// Jumps to the paragraph, so a reader can go straight to the prose the
+		// summary is about without picking a row first.
 		head.addEventListener('click', () => {
 			this.jumpTo({ start: section.start, end: section.start });
 		});
