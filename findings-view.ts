@@ -1,5 +1,12 @@
 import { ItemView, MarkdownView, WorkspaceLeaf } from 'obsidian';
-import { Finding, LintResult, Occurrence } from './engine/types';
+import { LintResult, Occurrence } from './engine/types';
+import {
+	DEFAULT_ROW_CAP,
+	buildPanelModel,
+	sectionSummary,
+	type PanelRow,
+	type PanelSection,
+} from './panel-model';
 import type PlumblinePlugin from './main';
 
 export const FINDINGS_VIEW_TYPE = 'plumbline-findings';
@@ -11,6 +18,11 @@ export class FindingsView extends ItemView {
 	private readonly plugin: PlumblinePlugin;
 	private result: LintResult | null = null;
 	private targetView: MarkdownView | null = null;
+	// Which grouped rows and collapsed groups the reader has opened. Kept across
+	// re-renders, because a re-lint while something is expanded should not close
+	// it under them.
+	private readonly expanded = new Set<string>();
+	private showAll = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PlumblinePlugin) {
 		super(leaf);
@@ -57,49 +69,120 @@ export class FindingsView extends ItemView {
 			});
 			return;
 		}
-		if (this.result.findings.length === 0) {
+		const docText = this.targetView.editor.getValue();
+		const model = buildPanelModel(
+			docText,
+			this.result.findings,
+			this.showAll ? Number.MAX_SAFE_INTEGER : DEFAULT_ROW_CAP,
+		);
+		if (model.sections.length === 0) {
 			container.createEl('p', {
 				cls: 'plumbline-findings-empty',
 				text: 'No flags in this note.',
 			});
 			return;
 		}
-		// One row per RULE, in priority order, rather than one per hit in
-		// document order. A chapter that fires the same rule fifteen times is one
-		// row saying so. The engine did the grouping and ranking (PL-B), so the
-		// panel, the report and the CLI cannot disagree about the count.
-		//
-		// Paragraph grouping, the severity floor and the row cap are PL-C.
-		const docText = this.targetView.editor.getValue();
+
 		const list = container.createDiv({ cls: 'plumbline-findings-list' });
-		for (const finding of this.result.findings) {
-			this.renderRow(list, finding, docText);
+		for (const section of model.sections) {
+			this.renderSection(list, section, docText);
+		}
+
+		// Never a silent truncation. The count is what tells a reader the list is
+		// partial, and the cap exists so a pathological note does not freeze the
+		// view, not to decide what they may see.
+		if (model.hidden > 0) {
+			const more = container.createEl('button', {
+				cls: 'plumbline-findings-more',
+				text: `Show ${model.hidden} more`,
+				attr: { type: 'button' },
+			});
+			more.addEventListener('click', () => {
+				this.showAll = true;
+				this.render();
+			});
+		}
+	}
+
+	private renderSection(
+		list: HTMLElement,
+		section: PanelSection,
+		docText: string,
+	): void {
+		const wrap = list.createDiv({ cls: 'plumbline-section' });
+		const head = wrap.createDiv({ cls: 'plumbline-section-head' });
+		head.createSpan({
+			cls: 'plumbline-section-name',
+			text: `Paragraph ${section.paragraph}`,
+		});
+		head.createSpan({
+			cls: 'plumbline-section-summary',
+			text: sectionSummary(section),
+		});
+		// The header jumps to the paragraph, so a reader can go straight to the
+		// prose the summary is about without picking a row first.
+		head.addEventListener('click', () => {
+			this.jumpTo({ start: section.start, end: section.start });
+		});
+
+		for (const row of section.rows) {
+			this.renderRow(wrap, row, docText);
+		}
+
+		if (section.collapsed.count > 0) {
+			const key = `${section.paragraph}`;
+			const open = this.expanded.has(key);
+			// Occurrences, matching the section header. Counting rules here put
+			// "1 suggestion" under a header reading "5 suggestions".
+			const n = section.collapsed.count;
+			const toggle = wrap.createEl('button', {
+				cls: 'plumbline-collapsed',
+				text: open
+					? `Hide ${n} suggestion${n === 1 ? '' : 's'}`
+					: `${n} suggestion${n === 1 ? '' : 's'}`,
+				attr: { type: 'button' },
+			});
+			toggle.addEventListener('click', () => {
+				if (open) {
+					this.expanded.delete(key);
+				} else {
+					this.expanded.add(key);
+				}
+				this.render();
+			});
+			if (open) {
+				for (const row of section.collapsed.rows) {
+					this.renderRow(wrap, row, docText);
+				}
+			}
 		}
 	}
 
 	private renderRow(
-		list: HTMLElement,
-		finding: Finding,
+		wrap: HTMLElement,
+		panelRow: PanelRow,
 		docText: string,
 	): void {
 		const targetView = this.targetView;
 		if (!targetView) {
 			return;
 		}
-		const first = finding.occurrences[0];
+		const first = panelRow.occurrences[0];
 		if (first === undefined) {
 			return;
 		}
-		const count = finding.occurrences.length;
-		const pos = targetView.editor.offsetToPos(first.start);
-		const row = list.createDiv({ cls: 'plumbline-finding' });
+		const count = panelRow.occurrences.length;
+		const key = `${panelRow.ruleSlug}:${first.start}`;
+		const open = this.expanded.has(key);
+
+		const row = wrap.createDiv({
+			cls: `plumbline-finding plumbline-finding-${panelRow.severity}`,
+		});
 		const head = row.createDiv({ cls: 'plumbline-finding-head' });
 		head.createSpan({
 			cls: 'plumbline-finding-text',
 			text: docText.slice(first.start, first.end),
 		});
-		// The count is what makes a grouped row readable: without it a rule that
-		// fired fifteen times looks the same as one that fired once.
 		if (count > 1) {
 			head.createSpan({
 				cls: 'plumbline-finding-count',
@@ -108,17 +191,42 @@ export class FindingsView extends ItemView {
 		}
 		head.createSpan({
 			cls: 'plumbline-finding-line',
-			text: `L${pos.line + 1}`,
+			text: `L${targetView.editor.offsetToPos(first.start).line + 1}`,
 		});
 		row.createDiv({
 			cls: 'plumbline-finding-msg',
-			text: finding.message,
+			text: panelRow.message,
 		});
-		// Clicking a grouped row goes to the FIRST occurrence. Expanding to the
-		// rest is PL-C; jumping somewhere is better than jumping nowhere.
-		row.addEventListener('click', () => {
-			this.jumpTo(first);
-		});
+
+		// A row standing for several hits expands to them rather than only ever
+		// jumping to the first, which is what "x12" would otherwise hide.
+		if (count > 1) {
+			row.addEventListener('click', () => {
+				if (open) {
+					this.expanded.delete(key);
+				} else {
+					this.expanded.add(key);
+				}
+				this.render();
+			});
+			if (open) {
+				const occ = row.createDiv({ cls: 'plumbline-occurrences' });
+				for (const [i, o] of panelRow.occurrences.entries()) {
+					const item = occ.createDiv({
+						cls: 'plumbline-occurrence',
+						text: `${i + 1}. ${docText.slice(o.start, o.end)}`,
+					});
+					item.addEventListener('click', (e) => {
+						e.stopPropagation();
+						this.jumpTo(o);
+					});
+				}
+			}
+		} else {
+			row.addEventListener('click', () => {
+				this.jumpTo(first);
+			});
+		}
 	}
 
 	private jumpTo(occurrence: Occurrence): void {
