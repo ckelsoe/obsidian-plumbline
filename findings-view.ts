@@ -131,23 +131,30 @@ export class FindingsView extends ItemView {
 			const more = container.createEl('button', {
 				cls: 'plumbline-findings-more',
 				text: `Show ${model.hidden} more`,
-				attr: { type: 'button' },
+				attr: {
+					type: 'button',
+					'aria-label': `Show ${model.hidden} more findings`,
+				},
 			});
 			more.addEventListener('click', () => {
 				// The button being activated is the one that disappears, so there
 				// is nothing to restore to. Focus moves to the FIRST newly
 				// revealed row instead: leaving it to fall to the document drops
 				// the reader out of the panel and restarts Tab somewhere else.
-				const shownBefore = container.querySelectorAll(
-					'.plumbline-finding-head',
-				).length;
+				// Every focusable control in list order, not just finding heads.
+				// When the hidden rows are collapsed suggestion groups they
+				// produce no head at all, so counting heads moved focus BACKWARD
+				// onto an old row, or nowhere.
+				const controls = (): NodeListOf<HTMLElement> =>
+					container.querySelectorAll<HTMLElement>(
+						'.plumbline-finding-head, .plumbline-collapsed',
+					);
+				const shownBefore = controls().length;
 				this.showAll = true;
 				this.focusKey = undefined;
 				this.render();
-				const heads = container.querySelectorAll(
-					'.plumbline-finding-head',
-				);
-				const next = heads.item(shownBefore) ?? heads.item(0);
+				const after = controls();
+				const next = after.item(shownBefore) ?? after.item(0);
 				// instanceOf, not instanceof: Obsidian can render a leaf in a
 				// separate window, where HTMLElement is a different constructor.
 				if (next?.instanceOf(HTMLElement)) next.focus();
@@ -202,7 +209,14 @@ export class FindingsView extends ItemView {
 				text: open
 					? `Hide ${n} suggestion${n === 1 ? '' : 's'}`
 					: `${n} suggestion${n === 1 ? '' : 's'}`,
-				attr: { type: 'button', 'data-plumbline-focus': focusKey },
+				attr: {
+					type: 'button',
+					'data-plumbline-focus': focusKey,
+					'aria-expanded': String(open),
+					// The visible text is a count; read aloud it has to say what
+					// activating it does and which paragraph it belongs to.
+					'aria-label': `${open ? 'Hide' : 'Show'} ${n} suggestion${n === 1 ? '' : 's'} in paragraph ${section.paragraph}`,
+				},
 			});
 			toggle.addEventListener('click', () => {
 				if (open) {
