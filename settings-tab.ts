@@ -48,7 +48,7 @@ export class PlumblineSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Active profile',
-						desc: 'The type of writing to lint for. The profile selects which rule packs are on and how they are tuned.',
+						desc: 'The type of writing to lint for. The profile selects which rule packs are on and how they are tuned. A note can override this with a plumbline-profile key in its frontmatter.',
 						control: {
 							type: 'dropdown',
 							key: 'activeProfile',

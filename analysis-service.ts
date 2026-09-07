@@ -17,7 +17,10 @@ export class AnalysisService {
 	// Run the engine against a specific markdown view, using the plugin's current
 	// resolved config (active profile plus vault overrides).
 	analyze(view: MarkdownView): LintResult {
-		return lint(view.editor.getValue(), this.plugin.resolvedConfig());
+		// One read of the text, used for both: the note's own profile decides
+		// which packs resolve, so config and lint must see the same document.
+		const text = view.editor.getValue();
+		return lint(text, this.plugin.resolvedConfig(text));
 	}
 
 	// Convenience for callers that only need the active note (the rhythm command).

@@ -5,6 +5,7 @@ import { rhythmStatusText, rhythmDetail } from './rhythm-format';
 import { plumblineDecorations, relintEditor } from './editor-decorations';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
 import { LintResult, ResolvedConfig } from './engine/types';
+import { fileScope } from './engine/file-scope';
 import { buildReport } from './report';
 import { scriptureReferences, scriptureQuotes } from './engine/scripture';
 import { summarizeScripture, Citation } from './engine/citation';
@@ -75,7 +76,7 @@ export default class PlumblinePlugin extends Plugin {
 
 		// Underline flagged phrases in the editor, live.
 		this.registerEditorExtension(
-			plumblineDecorations(() => this.resolvedConfig()),
+			plumblineDecorations((text) => this.resolvedConfig(text)),
 		);
 
 		this.registerView(
@@ -192,9 +193,18 @@ export default class PlumblinePlugin extends Plugin {
 		}
 	}
 
-	// The resolved config for the active profile, with vault overrides applied.
-	resolvedConfig(): ResolvedConfig {
-		return resolveConfig(this.settings.activeProfile, this.vaultConfig);
+	// The resolved config for a note, with vault overrides applied.
+	//
+	// `text` is optional so callers with no document (commands over a path, the
+	// settings tab listing rules) keep working, but every caller that HAS the
+	// text should pass it: the note's own `plumbline-profile` frontmatter or
+	// `profile` directive selects which pack set is active, and that decision has
+	// to happen before the config is resolved rather than inside lint().
+	resolvedConfig(text?: string): ResolvedConfig {
+		const profile =
+			(text !== undefined ? fileScope(text).profileId : undefined) ??
+			this.settings.activeProfile;
+		return resolveConfig(profile, this.vaultConfig);
 	}
 
 	private async loadVaultConfig(): Promise<void> {
@@ -560,10 +570,14 @@ export default class PlumblinePlugin extends Plugin {
 				new Notice('Plumbline: open a note first.');
 				return;
 			}
+			// The note's own profile, not the vault setting. The findings below
+			// were computed under it, so stamping the report with the vault
+			// profile would make the file disagree with its own contents.
+			const text = view.editor.getValue();
 			const report = buildReport(
 				file.path,
-				this.settings.activeProfile,
-				view.editor.getValue(),
+				this.resolvedConfig(text).profileId,
+				text,
 				this.analysis.analyze(view),
 			);
 			const dir = '.plumbline';

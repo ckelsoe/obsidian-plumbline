@@ -9,6 +9,12 @@ export const HTML_COMMENT_KIND = 'html-comment';
 
 // The base protected-span sources every profile starts with. Packs contribute
 // more (scripture quotes, dialogue); a profile selects which are active.
+// A region the note itself opted out of, between plumbline off/on directives
+// (PL-D). Not in BASE_SPAN_KINDS: those are the kinds a profile can turn on and
+// off, and a writer who wrote "skip this" in the note is not asking for a
+// setting to be consulted.
+export const SKIP_KIND = 'plumbline-skip';
+
 export const BASE_SPAN_KINDS = [
 	'frontmatter',
 	'code',
@@ -24,13 +30,17 @@ const ANNOTECA_OPENER = /^<!--\s*annoteca\//;
 
 // Leading YAML frontmatter: `---` on the first line through the next `---` line.
 function frontmatterSpan(text: string): Span | null {
-	if (!/^---[ \t]*\n/.test(text)) {
+	// `\r?` on both fences: a vault synced from Windows has CRLF notes, and
+	// without it their frontmatter is not masked at all, so rules fire inside
+	// YAML and a directive-shaped string in a frontmatter value counts as a
+	// directive.
+	if (!/^---[ \t]*\r?\n/.test(text)) {
 		return null;
 	}
 	// Append a newline so a document that ends right after the closing fence,
 	// with no trailing newline, still matches. No lookbehind: `(?<=...)` is a
 	// parse error in JavaScriptCore before iOS 16.4.
-	const closing = /\n---[ \t]*\n/g;
+	const closing = /\r?\n---[ \t]*\r?\n/g;
 	const match = closing.exec(text + '\n');
 	if (match === null) {
 		return null;
@@ -42,6 +52,21 @@ function frontmatterSpan(text: string): Span | null {
 	};
 }
 
+// A fence marker: which character opens it and how many of them. Counted rather
+// than matched, so there is no pattern whose complexity has to be argued about.
+interface Fence {
+	char: string;
+	length: number;
+}
+
+function fenceAt(trimmed: string): Fence | null {
+	const char = trimmed[0];
+	if (char !== '`' && char !== '~') return null;
+	let length = 0;
+	while (trimmed[length] === char) length++;
+	return length >= 3 ? { char, length } : null;
+}
+
 // Fenced code blocks and ATX headings, found by a single forward line scan so
 // the logic stays linear and never backtracks.
 function lineSpans(text: string): Span[] {
@@ -49,18 +74,31 @@ function lineSpans(text: string): Span[] {
 	let offset = 0;
 	let inFence = false;
 	let fenceStart = 0;
+	let open: Fence | null = null;
 	for (const line of text.split('\n')) {
 		const lineStart = offset;
 		const lineEnd = offset + line.length;
 		const trimmed = line.trimStart();
-		const isFence = trimmed.startsWith('```') || trimmed.startsWith('~~~');
+		const fence = fenceAt(trimmed);
 		if (inFence) {
-			if (isFence) {
+			// Markdown closes a fence only with the same character, at least as
+			// many of them. Treating any fence line as a closer ended a
+			// ````-delimited block at the first ``` inside it, which is exactly
+			// how anyone writes a fenced example OF a fenced block, and let a
+			// `~~~` close a ``` block.
+			if (
+				fence &&
+				open &&
+				fence.char === open.char &&
+				fence.length >= open.length
+			) {
 				spans.push({ start: fenceStart, end: lineEnd, kind: 'code' });
 				inFence = false;
+				open = null;
 			}
-		} else if (isFence) {
+		} else if (fence) {
 			inFence = true;
+			open = fence;
 			fenceStart = lineStart;
 		} else if (/^#{1,6}(?:\s|$)/.test(trimmed)) {
 			spans.push({ start: lineStart, end: lineEnd, kind: 'heading' });
@@ -128,6 +166,33 @@ function mergeSpans(spans: Span[]): Span[] {
 		}
 	}
 	return merged;
+}
+
+// Code and frontmatter, found without a config.
+//
+// Per-file scoping has to run BEFORE the config is resolved, because the note's
+// own `plumbline-profile` is what selects the profile. So it cannot call
+// protectedSpans(), which takes a ResolvedConfig: that is a cycle. These three
+// detectors take only text, which is what makes the cycle avoidable.
+//
+// It exists so a directive-shaped string inside a fence, an inline code span or
+// the frontmatter block is read as the text it is. Documenting `<!-- plumbline:
+// off -->` inside a fenced example is the obvious way to write about this
+// feature, and without this it would silently stop linting the rest of the note.
+//
+// lint() ends up running these detectors twice, once here and once inside
+// protectedSpans. Two linear passes over one note, which is cheaper than
+// threading a partial span list through a function whose whole value is that
+// it is pure over the text.
+export function literalSpans(text: string): Span[] {
+	const collected: Span[] = [];
+	const frontmatter = frontmatterSpan(text);
+	if (frontmatter) collected.push(frontmatter);
+	for (const span of lineSpans(text)) {
+		if (span.kind === 'code') collected.push(span);
+	}
+	collected.push(...inlineCodeSpans(text));
+	return mergeSpans(collected);
 }
 
 // The protected-span pass: runs before any rule and returns the spans a rule or
