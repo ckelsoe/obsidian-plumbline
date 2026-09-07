@@ -63,6 +63,67 @@
 	font-size: var(--font-ui-smaller);
 }
 
+/* CodeMirror's linter draws its own squiggle on every diagnostic range. Those
+   ranges are kept, because the underline layer, the hover and the gutter all read
+   them back through forEachDiagnostic, so the mark is hidden here rather than
+   filtered out of the diagnostic set. `content` and `padding-bottom` are both
+   needed: the base theme paints the squiggle as a background image and reserves
+   room for it. */
+.cm-lintRange.plumbline-flag {
+	background-image: none;
+	padding-bottom: 0;
+}
+
+/* Gutter severity bar (PL-A). CodeMirror renders one gutter element per LOGICAL
+   line, stretched to the full height of the wrapped block, so a 1692-character
+   paragraph is a single element roughly 456px tall against a 24px line height.
+   Measured over CDP on 2026-09-06.
+
+   That makes the marker a tall block rather than a dot, so it is drawn as a bar:
+   the colour carries the worst severity in the paragraph and the bar's own length
+   is already proportional to how much prose the finding covers. The default
+   theme's 1em square SVG is replaced, and the element padding removed, so the bar
+   reaches the full height it is given.
+
+   The gutter can never point at a phrase, only at a paragraph. That ceiling is
+   CodeMirror's, not a choice; the underline and the panel carry phrase-level
+   location. */
+/* Selector weight is deliberate and measured, not decorative. CodeMirror injects
+   its gutter theme under a generated class, as `.<gen> .cm-gutter-lint` (0,2,0)
+   and `.<gen> .cm-gutter-lint .cm-gutterElement` (0,3,0). A bare
+   `.cm-gutter-lint` loses to both, which was verified in the running app: the
+   gutter computed to 1.4em and the element padding to 0.2em with those rules in
+   place. Adding `.cm-editor` and the element's own `.cm-gutter` class clears them
+   without `!important`, which the submission check forbids. */
+.cm-editor .cm-gutter.cm-gutter-lint {
+	width: 6px;
+}
+
+.cm-editor .cm-gutter.cm-gutter-lint .cm-gutterElement {
+	padding: 0;
+}
+
+.cm-editor .cm-gutter.cm-gutter-lint .cm-lint-marker {
+	content: none;
+	width: 3px;
+	height: 100%;
+	margin-inline: auto;
+	border-radius: 1px;
+	background-color: var(--text-accent);
+}
+
+.cm-editor .cm-gutter.cm-gutter-lint .cm-lint-marker-error {
+	background-color: var(--text-error);
+}
+
+.cm-editor .cm-gutter.cm-gutter-lint .cm-lint-marker-warning {
+	background-color: var(--text-warning);
+}
+
+.cm-editor .cm-gutter.cm-gutter-lint .cm-lint-marker-info {
+	background-color: var(--text-accent);
+}
+
 /* Segment underlines: one line per coverage segment, colored by the worst
    severity covering it. A segment covered by two or more findings uses a double
    line so a denser spot is visibly different from a single-issue one; the line
@@ -94,6 +155,29 @@
 	color: var(--text-normal);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
+}
+
+/* Two artifacts of suppressing CodeMirror's lint hover with `tooltipFilter`,
+   both found by inspecting the live tooltip rather than by reading the source.
+
+   The filter returns an empty array, and CodeMirror's guard is
+   `if (!found) return null`. An empty array is truthy, so it still renders an
+   empty <ul class="cm-tooltip-lint cm-tooltip-section"> into the shared hover
+   container. The <ul> itself is invisible, but it lands BEFORE this plugin's
+   popup, which makes the popup `:not(:first-child)`, and CodeMirror's base theme
+   draws a hardcoded `1px solid #bbb` border-top on every section after the first.
+   That was a grey hairline across the top of every finding popup, wrong on any
+   theme and obvious on a dark one.
+
+   Hiding the empty section does not fix it: `:first-child` is a DOM position, not
+   a rendered one. So the border is cleared on the popup itself, at four classes to
+   clear the base theme's three without `!important`. */
+.cm-tooltip-hover .cm-tooltip-lint:empty {
+	display: none;
+}
+
+.cm-tooltip.cm-tooltip-hover .plumbline-hover.cm-tooltip-section {
+	border-top: none;
 }
 
 .plumbline-hover {
