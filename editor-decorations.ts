@@ -221,7 +221,7 @@ function renderFinding(diagnostic: Diagnostic): HTMLElement {
 // read, so the two cannot disagree.
 function findingsHover(): Extension {
 	return hoverTooltip(
-		(view, pos): Tooltip | null => {
+		(view, pos, side): Tooltip | null => {
 			// `end` is EXCLUSIVE, matching Span, report.ts's slice and
 			// CodeMirror's own ranges, so the last position covered is
 			// `end - 1`. With `pos <= d.end` two adjacent findings both matched
@@ -234,8 +234,15 @@ function findingsHover(): Extension {
 			// exact stretch over which these messages stay true. Segments are split on
 			// every finding boundary, so crossing into a different set of findings
 			// leaves the segment and rebuilds the popup. See segmentAt.
+			// `side` is -1 when the pointer sits BEFORE `pos`, meaning it is over
+			// the character at `pos - 1`. Ignoring it made the trailing half of a
+			// finding's last character resolve to whatever starts at `pos`, so
+			// that half either showed the next finding's messages or nothing at
+			// all. Segment lookup is character-based, so the character under the
+			// pointer is the one to ask about.
+			const at = side < 0 ? pos - 1 : pos;
 			const all = findingsIn(view.state);
-			const seg = segmentAt(all, pos);
+			const seg = segmentAt(all, at);
 			if (seg === null) {
 				return null;
 			}
@@ -250,6 +257,7 @@ function findingsHover(): Extension {
 				above: false,
 				create() {
 					const dom = createDiv({ cls: 'plumbline-hover' });
+					let host: HTMLElement | null = null;
 					for (const d of covering) {
 						dom.appendChild(renderFinding(d));
 					}
@@ -262,20 +270,19 @@ function findingsHover(): Extension {
 						// the containers holding this plugin's popup. `mount`
 						// runs once the tooltip is in the DOM, which is the
 						// first point the parent exists.
+						// The container is captured here rather than looked up
+						// again in destroy(). CodeMirror detaches `dom` before
+						// calling destroy(), so `dom.parentElement` is null by
+						// then and the class would be left behind on a container
+						// it can reuse for the next tooltip, theming another
+						// extension's hover with this plugin's colours.
 						mount() {
-							dom.parentElement?.classList.add(
-								'plumbline-tooltip',
-							);
+							host = dom.parentElement;
+							host?.classList.add('plumbline-tooltip');
 						},
-						// Removed again on close. CodeMirror can reuse a hover
-						// container for the next tooltip, and a class left behind
-						// would theme another extension's hover with this
-						// plugin's colours. The tag has to live exactly as long
-						// as the popup does.
 						destroy() {
-							dom.parentElement?.classList.remove(
-								'plumbline-tooltip',
-							);
+							host?.classList.remove('plumbline-tooltip');
+							host = null;
 						},
 					};
 				},
