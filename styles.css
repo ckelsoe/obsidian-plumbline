@@ -43,7 +43,17 @@
 	background-color: var(--background-modifier-hover);
 }
 
+/* A <button>, so the primary interaction is keyboard reachable; reset so it
+   still reads as the row heading it is. */
 .plumbline-finding-head {
+	width: 100%;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	color: inherit;
+	font-size: inherit;
+	text-align: left;
+	cursor: pointer;
 	display: flex;
 	justify-content: space-between;
 	gap: var(--size-2-3);
@@ -51,6 +61,85 @@
 
 .plumbline-finding-text {
 	font-weight: var(--font-semibold);
+}
+
+/* Panel sections: one per paragraph, so the reader asks "what is wrong with this
+   stretch of prose" rather than scrolling a flat list. The header carries the
+   same counts the gutter bar reports for that paragraph, deliberately: the two
+   describe the same thing and disagreeing would be worse than repeating. */
+.plumbline-section {
+	margin-bottom: var(--size-4-3);
+}
+
+/* A <button>, so it is keyboard reachable; reset to look like the row it is. */
+.plumbline-section-head {
+	width: 100%;
+	background: transparent;
+	box-shadow: none;
+	font-size: inherit;
+	color: inherit;
+	display: flex;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+	padding: var(--size-4-1) 0;
+	cursor: pointer;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.plumbline-section-name {
+	font-weight: var(--font-semibold);
+}
+
+.plumbline-section-summary {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+/* Suggestions collapse to one counted row per paragraph: never silently hidden,
+   always counted, one click to expand. */
+.plumbline-collapsed,
+.plumbline-findings-more {
+	margin-top: var(--size-4-1);
+	padding: var(--size-4-1) var(--size-4-2);
+	background: transparent;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	width: 100%;
+	text-align: left;
+}
+
+.plumbline-findings-more {
+	margin-top: var(--size-4-2);
+}
+
+/* The occurrences behind a grouped row, shown when it is expanded. Indented so
+   they read as belonging to the row above rather than as more rows. */
+.plumbline-occurrences {
+	margin-top: var(--size-4-1);
+	padding-left: var(--size-4-3);
+	border-left: 2px solid var(--background-modifier-border);
+}
+
+/* A <button>, so it is keyboard reachable; reset to read as a list entry. */
+.plumbline-occurrence {
+	display: block;
+	width: 100%;
+	text-align: left;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	font-size: var(--font-ui-smaller);
+	padding: 2px 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+}
+
+.plumbline-occurrence:hover {
+	color: var(--text-normal);
 }
 
 /* Occurrence count on a grouped row. Without it a rule that fired fifteen times
@@ -111,27 +200,57 @@
 	background-color: var(--text-accent);
 }
 
-/* Segment underlines: one line per coverage segment, colored by the worst
-   severity covering it. A segment covered by two or more findings uses a double
-   line so a denser spot is visibly different from a single-issue one; the line
-   height cannot fit several stacked lines, so density is shown by line style, not
-   by extra rows. border-bottom is used rather than a text-decoration color or
-   style, which the marketplace CSS scan flags. */
+/* Segment underlines: one squiggle per coverage segment, coloured by the worst
+   severity covering it. A segment covered by two or more findings gets a taller,
+   denser one, so a spot with several issues is visibly different from a
+   single-issue one.
+
+   NOT `text-decoration`. The marketplace scan flags any text-decoration carrying
+   a colour, a `wavy` style or a thickness, whether longhand or folded into the
+   shorthand, and Annoteca lost its wavy underline to exactly that. It is drawn
+   as a background instead, which the scan has nothing to say about.
+
+   Two crossed linear-gradients rather than the inline-SVG data URI the rollout
+   plan proposed (and that @codemirror/lint uses). The SVG works, but its colour
+   is baked into the URI and a CSS variable cannot be interpolated into one, so it
+   would not follow the user's theme. Gradients take var() directly, and
+   linear-gradient with background-size/repeat/position is as old as anything in
+   this file. The severity colour is a variable so the three rules below set one
+   property each instead of restating the whole stack. */
 .plumbline-mark {
-	border-bottom: 2px solid var(--text-accent);
+	--plumbline-squiggle: var(--text-accent);
+	background-image: linear-gradient(
+			45deg,
+			transparent 45%,
+			var(--plumbline-squiggle) 45%,
+			var(--plumbline-squiggle) 55%,
+			transparent 55%
+		),
+		linear-gradient(
+			-45deg,
+			transparent 45%,
+			var(--plumbline-squiggle) 45%,
+			var(--plumbline-squiggle) 55%,
+			transparent 55%
+		);
+	background-size: 6px 3px;
+	background-repeat: repeat-x;
+	background-position: left bottom;
+	/* Room for the squiggle under the descenders, so it never crosses the text. */
+	padding-bottom: 3px;
 }
 
 .plumbline-mark-warning {
-	border-bottom-color: var(--text-warning);
+	--plumbline-squiggle: var(--text-warning);
 }
 
 .plumbline-mark-error {
-	border-bottom-color: var(--text-error);
+	--plumbline-squiggle: var(--text-error);
 }
 
 .plumbline-mark-multi {
-	border-bottom-style: double;
-	border-bottom-width: 4px;
+	background-size: 5px 4px;
+	padding-bottom: 4px;
 }
 
 /* The hover popup shown over an underlined finding. CodeMirror's hover-tooltip
