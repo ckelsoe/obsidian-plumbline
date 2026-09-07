@@ -222,8 +222,13 @@ function renderFinding(diagnostic: Diagnostic): HTMLElement {
 function findingsHover(): Extension {
 	return hoverTooltip(
 		(view, pos): Tooltip | null => {
+			// `end` is EXCLUSIVE, matching Span, report.ts's slice and
+			// CodeMirror's own ranges, so the last position covered is
+			// `end - 1`. With `pos <= d.end` two adjacent findings both matched
+			// at their shared boundary, and the popup showed both messages over a
+			// span covering both ranges when only the second is under the pointer.
 			const covering = findingsIn(view.state).filter(
-				(d) => pos >= d.start && pos <= d.end,
+				(d) => pos >= d.start && pos < d.end,
 			);
 			if (covering.length === 0) {
 				return null;
@@ -254,6 +259,16 @@ function findingsHover(): Extension {
 						// first point the parent exists.
 						mount() {
 							dom.parentElement?.classList.add(
+								'plumbline-tooltip',
+							);
+						},
+						// Removed again on close. CodeMirror can reuse a hover
+						// container for the next tooltip, and a class left behind
+						// would theme another extension's hover with this
+						// plugin's colours. The tag has to live exactly as long
+						// as the popup does.
+						destroy() {
+							dom.parentElement?.classList.remove(
 								'plumbline-tooltip',
 							);
 						},
