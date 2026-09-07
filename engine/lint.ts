@@ -1,7 +1,8 @@
 import { LintResult, Metrics, ResolvedConfig } from './types';
 import { protectedSpans, maskSpans } from './protected-spans';
 import { applyRules } from './apply-rules';
-import { applyHeuristics } from './heuristics';
+import { applyHeuristics, heuristicConfidence } from './heuristics';
+import { CONFIDENCE, confidenceFor, rollup } from './rollup';
 import { splitSentencesWithOffsets } from './sentences';
 import { wordCount, mean, coefficientOfVariation } from './sentence-stats';
 
@@ -27,5 +28,29 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 		...applyHeuristics(prose, sentences, new Set(config.disabledSlugs)),
 	];
 	diagnostics.sort((a, b) => a.start - b.start || a.end - b.end);
-	return { diagnostics, metrics, spans };
+
+	// Confidence lives on the rule record, not on the hit, so it is resolved here
+	// where both rule sets are in scope. A mechanical rule is one the config
+	// carries; anything else came from the heuristics.
+	const mechanical = new Map(config.rules.map((r) => [r.slug, r]));
+	const confidenceOf = (slug: string): number => {
+		const rule = mechanical.get(slug);
+		if (rule !== undefined) {
+			return confidenceFor(
+				slug,
+				rule.confidence,
+				CONFIDENCE.mechanical,
+				config.confidenceBySlug,
+			);
+		}
+		return confidenceFor(
+			slug,
+			heuristicConfidence(slug),
+			CONFIDENCE.heuristic,
+			config.confidenceBySlug,
+		);
+	};
+
+	const findings = rollup(diagnostics, config, confidenceOf);
+	return { diagnostics, findings, metrics, spans };
 }

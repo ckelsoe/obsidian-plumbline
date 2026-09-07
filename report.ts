@@ -17,12 +17,47 @@ export interface ReportFinding {
 	message: string;
 }
 
+// Bumped whenever the shape below changes, so a headless consumer can tell a
+// report it understands from one it does not. Stamped from the first version
+// that carried it rather than added later: a shape change with no version on it
+// is indistinguishable from the old shape to anything reading these files.
+//
+//   1  file, profile, metrics, scripture, findings[] (one entry per hit)
+//   2  findings[] become one entry per RULE, carrying every occurrence, a
+//      confidence and a priority, ranked. `hits` holds the old per-hit list.
+export const REPORT_SCHEMA_VERSION = 2;
+
+// One rule's findings for this note: every place it fired, plus what the ranking
+// thought of it. This is the rolled-up shape the panel and the hub lane read, so
+// a collaborator on the filesystem sees the same counts the writer sees.
+export interface ReportRuleFinding {
+	ruleSlug: string;
+	packId: string;
+	severity: Severity;
+	message: string;
+	confidence: number;
+	priority: number;
+	rolledUp: boolean;
+	occurrences: {
+		line: number;
+		start: number;
+		end: number;
+		text: string;
+	}[];
+}
+
 export interface Report {
+	schemaVersion: number;
 	file: string;
 	profile: string;
 	metrics: LintResult['metrics'];
 	scripture: ScriptureUsage;
-	findings: ReportFinding[];
+	// Ranked, one per rule. Read this first.
+	findings: ReportRuleFinding[];
+	// Every hit at its own position, unranked, in document order. Kept because it
+	// is what a positional consumer needs and what the parity oracle diffs
+	// against; the rolled-up view above cannot be un-rolled back into it.
+	hits: ReportFinding[];
 }
 
 // One-based line number of a character offset, counted by newlines before it.
@@ -44,11 +79,27 @@ export function buildReport(
 	result: LintResult,
 ): Report {
 	return {
+		schemaVersion: REPORT_SCHEMA_VERSION,
 		file,
 		profile,
 		metrics: result.metrics,
 		scripture: summarizeScripture(scriptureReferences(text)),
-		findings: result.diagnostics.map((d) => ({
+		findings: result.findings.map((f) => ({
+			ruleSlug: f.ruleSlug,
+			packId: f.packId,
+			severity: f.severity,
+			message: f.message,
+			confidence: f.confidence,
+			priority: f.priority,
+			rolledUp: f.rolledUp,
+			occurrences: f.occurrences.map((o) => ({
+				line: lineOf(text, o.start),
+				start: o.start,
+				end: o.end,
+				text: text.slice(o.start, o.end),
+			})),
+		})),
+		hits: result.diagnostics.map((d) => ({
 			ruleSlug: d.ruleSlug,
 			packId: d.packId,
 			severity: d.severity,

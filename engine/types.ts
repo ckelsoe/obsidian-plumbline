@@ -36,6 +36,42 @@ export interface Rule {
 	severity: Severity;
 	message: string;
 	phrases: string[];
+	// How often this rule is right when it fires, 0..1. Ranking multiplies by it,
+	// so a rule that is usually correct outranks a noisy one with the same
+	// severity and count. Omitted means the default for the rule's kind, which is
+	// what almost every record should do: see CONFIDENCE in rollup.ts, where the
+	// three tiers and their reasoning live.
+	confidence?: number;
+}
+
+// One place a rule fired. A finding carries every one of them, so a rolled-up
+// finding can still point at each hit.
+export interface Occurrence {
+	start: number; // inclusive UTF-16 offset
+	end: number; // exclusive UTF-16 offset
+}
+
+// What the panel, the report and (from PL-E) the API show: one row per rule per
+// note rather than one per hit, ranked so the rules most worth reading come first.
+//
+// This is NOT what the editor underlines. Those need every hit at its own
+// position, which is `LintResult.diagnostics`. Keeping both is deliberate: rollup
+// is a separate stage over the raw findings, so the raw ones stay available for
+// the underline layer and for the parity check against prose-check-prototype.py,
+// which would otherwise have to learn to roll up too.
+export interface Finding {
+	ruleSlug: string;
+	packId: string;
+	severity: Severity;
+	message: string;
+	occurrences: Occurrence[];
+	confidence: number;
+	// severityWeight x occurrenceCount x confidence. Findings come back sorted by
+	// it, descending.
+	priority: number;
+	// True when this stands in for more hits than the threshold allows as separate
+	// rows. `occurrences.length` still holds every one of them.
+	rolledUp: boolean;
 }
 
 // Per-document statistics, so the panel and the report show the rhythm summary
@@ -49,7 +85,12 @@ export interface Metrics {
 }
 
 export interface LintResult {
+	// Every hit at its own position, unrolled and unranked, sorted by position.
+	// The editor underlines and the parity oracle read this.
 	diagnostics: Diagnostic[];
+	// The same hits grouped per rule, rolled up past the threshold and ranked by
+	// priority. The panel, the report and the API read this.
+	findings: Finding[];
 	metrics: Metrics;
 	spans: Span[];
 }
@@ -65,4 +106,11 @@ export interface ResolvedConfig {
 	// Slugs the user disabled. Mechanical rules are already dropped from `rules`;
 	// the heuristics run separately and consult this set so they can be toggled too.
 	disabledSlugs: string[];
+	// Above this many hits of ONE rule in one note, the findings list carries a
+	// single rolled-up row instead of one row per hit. Per profile, because a
+	// technical profile and a devotional one disagree about what reads as noise.
+	rollupThreshold: number;
+	// Per-rule confidence overrides, slug to 0..1, from the vault config. A rule
+	// absent here uses its record's value, or the default for its kind.
+	confidenceBySlug: Record<string, number>;
 }

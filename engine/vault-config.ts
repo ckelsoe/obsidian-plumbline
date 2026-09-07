@@ -14,6 +14,12 @@ export interface RuleOverride {
 
 export interface VaultConfig {
 	disabledRules: string[];
+	// Volume tuning (PL-B). Both optional: a config file written before these
+	// existed resolves to the built-in defaults.
+	rollupThreshold?: number;
+	// Per-rule confidence, slug to 0..1. Clamped when it is read, because this
+	// file is hand-edited and a negative or huge value would invert the ranking.
+	confidence?: Record<string, number>;
 	// Protected-span kinds the user turned off, so a rule can once again fire
 	// inside them (the comment kinds are the ones exposed as toggles).
 	disabledSpanKinds: string[];
@@ -94,6 +100,34 @@ function asOverrides(value: unknown): Record<string, RuleOverride> {
 	return result;
 }
 
+// A finite, non-negative integer, or undefined. Used for rollupThreshold, where
+// a string, NaN or a negative would otherwise reach the ranking maths.
+function asPositiveInt(value: unknown): number | undefined {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+		return undefined;
+	}
+	return Math.floor(value);
+}
+
+// Per-rule confidence, slug to 0..1. Entries that are not finite numbers are
+// dropped; values outside the range are clamped rather than dropped, because a
+// user writing 2 means "trust this a lot" and the nearest legal reading of that
+// is 1, not "ignore what I wrote".
+function asConfidence(value: unknown): Record<string, number> {
+	const out: Record<string, number> = {};
+	if (typeof value !== 'object' || value === null) {
+		return out;
+	}
+	for (const [slug, raw] of Object.entries(
+		value as Record<string, unknown>,
+	)) {
+		if (typeof raw === 'number' && Number.isFinite(raw)) {
+			out[slug] = Math.min(1, Math.max(0, raw));
+		}
+	}
+	return out;
+}
+
 // Parse untrusted JSON from disk into a VaultConfig, dropping anything malformed
 // rather than throwing. Unknown fields and bad entries are ignored.
 export function parseVaultConfig(raw: unknown): VaultConfig {
@@ -108,6 +142,8 @@ export function parseVaultConfig(raw: unknown): VaultConfig {
 			? obj.rules.map(asRule).filter((r): r is Rule => r !== null)
 			: [],
 		overrides: asOverrides(obj.overrides),
+		rollupThreshold: asPositiveInt(obj.rollupThreshold),
+		confidence: asConfidence(obj.confidence),
 	};
 }
 

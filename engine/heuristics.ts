@@ -1,4 +1,5 @@
 import { Diagnostic, Severity } from './types';
+import { CONFIDENCE } from './rollup';
 import {
 	SentenceSpan,
 	ParagraphSpan,
@@ -15,6 +16,10 @@ interface HeuristicRule {
 	packId: string;
 	severity: Severity;
 	message: string;
+	// Omitted means the heuristic default (see CONFIDENCE in rollup.ts). Set it
+	// only where a rule decides differently from its neighbours, which here means
+	// the two judgment-tier notes.
+	confidence?: number;
 	run(
 		text: string,
 		sentences: SentenceSpan[],
@@ -320,6 +325,8 @@ export const HEURISTIC_RULES: HeuristicRule[] = [
 		severity: 'suggestion',
 		message:
 			'Vague personal claim. Add a specific: a name, a date, a place.',
+		// Judgment tier, same reasoning as anchor-test below.
+		confidence: CONFIDENCE.judgment,
 		run: (_text, sentences) => {
 			const ranges: Range[] = [];
 			for (const sentence of sentences) {
@@ -342,6 +349,9 @@ export const HEURISTIC_RULES: HeuristicRule[] = [
 		packId: HEURISTIC_PACK_ID,
 		severity: 'suggestion',
 		message: 'Abstract, no anchor. Rewrite onto a concrete particular.',
+		// Judgment tier: it reads abstraction, not a pattern, and is wrong often
+		// enough that it must not outrank a mechanical rule at equal count.
+		confidence: CONFIDENCE.judgment,
 		run: (_text, sentences) => {
 			const ranges: Range[] = [];
 			for (const sentence of sentences) {
@@ -355,6 +365,12 @@ export const HEURISTIC_RULES: HeuristicRule[] = [
 		},
 	},
 ];
+
+// The confidence a heuristic declares, or undefined to take the default. Exported
+// so lint() can resolve a slug's confidence without importing the whole record set.
+export function heuristicConfidence(slug: string): number | undefined {
+	return HEURISTIC_RULES.find((r) => r.slug === slug)?.confidence;
+}
 
 // Run the cross-sentence heuristics over the masked prose. Offsets map back onto
 // the source, the same as the mechanical rules. A heuristic whose slug is in
