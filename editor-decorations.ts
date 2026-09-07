@@ -1,63 +1,191 @@
-import { EditorState, Extension, Range, StateEffect } from '@codemirror/state';
+import {
+	EditorState,
+	Extension,
+	Range,
+	RangeSet,
+	RangeValue,
+	StateEffect,
+	StateField,
+} from '@codemirror/state';
 import {
 	Decoration,
 	DecorationSet,
 	EditorView,
+	GutterMarker,
 	Tooltip,
 	ViewPlugin,
 	ViewUpdate,
+	gutter,
 	hoverTooltip,
 } from '@codemirror/view';
-import {
-	Diagnostic as CmDiagnostic,
-	forEachDiagnostic,
-	forceLinting,
-	linter,
-	lintGutter,
-	setDiagnosticsEffect,
-} from '@codemirror/lint';
 import { lint } from './engine/lint';
 import { Diagnostic, ResolvedConfig, Severity } from './engine/types';
 import { coverageSegments } from './underline-coverage';
 import { summarizeSeverities } from './gutter-summary';
 
-// Dispatched to an editor when the plugin config changes (profile switch, rule
-// toggle, config reload). The linter watches for it through `needsRefresh`, which
-// `forceLinting` alone cannot do once the initial lint has settled.
+// This plugin owns every surface it draws, and shares none of them.
+//
+// It used to run through @codemirror/lint: `linter()` for scheduling, the lint
+// state for storage, `lintGutter()` for the marker. All three are shared with any
+// other extension in the same editor, and that is not a detail. `lintConfig` is a
+// combined facet, so a `tooltipFilter` here suppressed every other plugin's lint
+// hover; the lint gutter is one gutter, so filtering it to this plugin's findings
+// deleted other plugins' markers. Filtering the other way round let a foreign
+// diagnostic colour this plugin's bar. There is no filter setting that is correct,
+// because the premise was wrong: a plugin-specific signal does not belong in
+// shared infrastructure.
+//
+// So: a private state field, a private debounce, a private gutter with its own
+// class, and a hover keyed on this plugin's own findings. Nothing here can affect
+// another extension, and nothing another extension does can affect this.
+
+// Dispatched when the plugin config changes (profile switch, rule toggle, config
+// reload) so the pass re-runs at once rather than on the next keystroke.
 const configChanged = StateEffect.define<null>();
 
-// Debounce for the engine pass while typing. Every surface reads the result of
-// this one call, so it is the only place the engine runs.
+// Carries a completed engine pass into the state field.
+const setFindings = StateEffect.define<readonly Diagnostic[]>();
+
+// Debounce for the engine pass while typing. One pass feeds the underlines, the
+// hover and the gutter, so this is the only place the engine runs.
 const LINT_DELAY = 400;
 
 // How long the pointer must rest on a finding before its popup appears.
 const HOVER_TIME = 200;
 
-// A CodeMirror diagnostic carrying the engine finding it came from. CodeMirror
-// stores these objects as given and hands them back through forEachDiagnostic,
-// so the severity and rule message survive the round trip without a parallel map
-// keyed on position.
-interface PlumblineDiagnostic extends CmDiagnostic {
-	plumbline: Diagnostic;
-}
-
-function isPlumblineDiagnostic(d: CmDiagnostic): d is PlumblineDiagnostic {
-	return 'plumbline' in d;
-}
-
-// Map the engine's severities onto CodeMirror's. 'suggestion' has no exact CM
-// equivalent, so it uses 'info', the lowest-urgency mark CM styles.
-function cmSeverity(severity: Severity): CmDiagnostic['severity'] {
-	if (severity === 'error') {
-		return 'error';
+// One finding, held in a RangeSet so CodeMirror maps its position through every
+// edit. That mapping is the reason findings are stored as ranges rather than kept
+// as the offsets the engine returned: between a keystroke and the next debounced
+// pass those offsets are stale, and the marks would sit on the wrong words.
+class FindingValue extends RangeValue {
+	constructor(readonly diagnostic: Diagnostic) {
+		super();
 	}
-	if (severity === 'warning') {
-		return 'warning';
-	}
-	return 'info';
 }
 
-// A short, human label for the severity, shown as a colored tag in the popup so a
+const findingsField = StateField.define<RangeSet<FindingValue>>({
+	create() {
+		return RangeSet.empty;
+	},
+	update(value, tr) {
+		// Mapped first, so a pass that arrives in the same transaction as a
+		// change replaces the mapped set rather than being mapped itself.
+		let next = value.map(tr.changes);
+		for (const effect of tr.effects) {
+			if (effect.is(setFindings)) {
+				const docLength = tr.state.doc.length;
+				const ranges: Range<FindingValue>[] = [];
+				for (const d of effect.value) {
+					if (d.end > d.start && d.end <= docLength) {
+						ranges.push(new FindingValue(d).range(d.start, d.end));
+					}
+				}
+				next = RangeSet.of(ranges, true);
+			}
+		}
+		return next;
+	},
+});
+
+// The findings currently held, at their CURRENT positions.
+function findingsIn(state: EditorState): Diagnostic[] {
+	const out: Diagnostic[] = [];
+	const iter = state.field(findingsField).iter();
+	while (iter.value) {
+		if (iter.to > iter.from) {
+			out.push({
+				...iter.value.diagnostic,
+				start: iter.from,
+				end: iter.to,
+			});
+		}
+		iter.next();
+	}
+	return out;
+}
+
+// Runs the engine, debounced, and pushes the result into the field. The only
+// caller of lint() in the editor path.
+function findingsPass(getConfig: () => ResolvedConfig): Extension {
+	return ViewPlugin.fromClass(
+		class {
+			private timer: number | null = null;
+			private destroyed = false;
+
+			// The first pass is SCHEDULED, never run inline. A ViewPlugin may not
+			// dispatch from its constructor: CodeMirror throws, catches, and
+			// disables the plugin, which kills the debounce and every later pass
+			// with it, silently. Zero delay so the first paint is still immediate.
+			constructor(private readonly view: EditorView) {
+				this.schedule(0);
+			}
+
+			update(update: ViewUpdate): void {
+				if (
+					update.docChanged ||
+					update.transactions.some((tr) =>
+						tr.effects.some((e) => e.is(configChanged)),
+					)
+				) {
+					this.schedule(LINT_DELAY);
+				}
+			}
+
+			private schedule(delay: number): void {
+				if (this.timer !== null) {
+					window.clearTimeout(this.timer);
+				}
+				this.timer = window.setTimeout(() => {
+					this.timer = null;
+					this.run();
+				}, delay);
+			}
+
+			// Guarded on `destroyed` because the timer outlives the plugin when a
+			// leaf is closed mid-debounce, and dispatching into a torn-down view
+			// throws.
+			private run(): void {
+				if (this.destroyed) {
+					return;
+				}
+				const result = lint(
+					this.view.state.doc.toString(),
+					getConfig(),
+				);
+				this.view.dispatch({
+					effects: setFindings.of(result.diagnostics),
+				});
+			}
+
+			destroy(): void {
+				this.destroyed = true;
+				if (this.timer !== null) {
+					window.clearTimeout(this.timer);
+					this.timer = null;
+				}
+			}
+		},
+	);
+}
+
+// The visible underlines: one mark per coverage segment, coloured by the worst
+// severity covering it, doubled where two or more findings overlap so a denser
+// spot is visibly different from a single-issue one. Segments never overlap, so
+// each is one clean mark and the line height is not a constraint.
+function buildUnderlines(state: EditorState): DecorationSet {
+	const ranges: Range<Decoration>[] = [];
+	for (const seg of coverageSegments(findingsIn(state))) {
+		const multi = seg.count >= 2 ? ' plumbline-mark-multi' : '';
+		ranges.push(
+			Decoration.mark({
+				class: `plumbline-mark plumbline-mark-${seg.severity}${multi}`,
+			}).range(seg.start, seg.end),
+		);
+	}
+	return Decoration.set(ranges, true);
+}
+
+// A short, human label for the severity, shown as a coloured tag in the popup so a
 // reader can tell the issue types apart when several cover the same text.
 function severityLabel(severity: Severity): string {
 	if (severity === 'error') {
@@ -69,7 +197,7 @@ function severityLabel(severity: Severity): string {
 	return 'Suggestion';
 }
 
-// One finding row for the popup: a colored severity tag and the rule message.
+// One finding row for the popup: a coloured severity tag and the rule message.
 function renderFinding(diagnostic: Diagnostic): HTMLElement {
 	const el = createDiv({ cls: 'plumbline-hover-item' });
 	el.createSpan({
@@ -80,113 +208,12 @@ function renderFinding(diagnostic: Diagnostic): HTMLElement {
 	return el;
 }
 
-// The gutter tooltip: one summary line rather than a list of every finding on the
-// paragraph. The counting and wording live in gutter-summary.ts so they can be
-// tested without CodeMirror; the reasoning is recorded there.
-//
-// A single finding is returned as itself, because a count of one tells the reader
-// nothing they cannot already see.
-//
-// The bar's COLOUR is unaffected by this filter: CodeMirror computes it with
-// maxSeverity over the unfiltered set when it builds the marker.
-function gutterTooltip(diagnostics: readonly CmDiagnostic[]): CmDiagnostic {
-	const first = diagnostics[0];
-	if (diagnostics.length === 1 && first) {
-		return first;
-	}
-	const severities = diagnostics.map((d) =>
-		isPlumblineDiagnostic(d) ? d.plumbline.severity : 'suggestion',
-	);
-	const summary = summarizeSeverities(severities);
-	return {
-		from: first?.from ?? 0,
-		to: first?.to ?? 0,
-		severity: cmSeverity(summary.severity),
-		message: summary.message,
-	};
-}
-
-// The findings CodeMirror currently holds, at their CURRENT positions.
-//
-// Reading the lint state rather than calling the engine is the point of this
-// function. The engine runs once per debounce interval, in the linter source
-// below, and the underlines, the hover and the gutter all read what it produced.
-// Before this, the underline layer ran a full-document lint() on every keystroke
-// and the hover ran another on every hover.
-//
-// The positions come from the callback, not from `d.plumbline`. CodeMirror maps
-// its diagnostic ranges through every edit, so between a keystroke and the next
-// debounced pass the mapped range still covers the right words while the offsets
-// the engine computed are stale.
-function currentFindings(state: EditorState): Diagnostic[] {
-	const out: Diagnostic[] = [];
-	forEachDiagnostic(state, (d, from, to) => {
-		if (isPlumblineDiagnostic(d) && to > from) {
-			out.push({ ...d.plumbline, start: from, end: to });
-		}
-	});
-	return out;
-}
-
-// The visible underlines: one line per coverage segment, colored by the worst
-// severity covering it, and drawn as a double underline where two or more findings
-// overlap so a denser spot is visibly different from a single-issue one. Segments
-// never overlap, so each is one clean mark.
-function buildUnderlines(view: EditorView): DecorationSet {
-	const docLength = view.state.doc.length;
-	const inRange = currentFindings(view.state).filter(
-		(d) => d.end > d.start && d.end <= docLength,
-	);
-	const ranges: Range<Decoration>[] = [];
-	for (const seg of coverageSegments(inRange)) {
-		const multi = seg.count >= 2 ? ' plumbline-mark-multi' : '';
-		ranges.push(
-			Decoration.mark({
-				class: `plumbline-mark plumbline-mark-${seg.severity}${multi}`,
-			}).range(seg.start, seg.end),
-		);
-	}
-	return Decoration.set(ranges, true);
-}
-
-function segmentUnderlines(): Extension {
-	return ViewPlugin.fromClass(
-		class {
-			decorations: DecorationSet;
-
-			constructor(view: EditorView) {
-				this.decorations = buildUnderlines(view);
-			}
-
-			update(update: ViewUpdate): void {
-				// Rebuilt on docChanged as well as on a new lint result, so the
-				// marks track the text while typing instead of sitting at stale
-				// offsets until the debounce elapses. This is cheap now: it walks
-				// the existing diagnostic range set and runs no rules.
-				if (
-					update.docChanged ||
-					update.transactions.some((tr) =>
-						tr.effects.some((effect) =>
-							effect.is(setDiagnosticsEffect),
-						),
-					)
-				) {
-					this.decorations = buildUnderlines(update.view);
-				}
-			}
-		},
-		{ decorations: (plugin) => plugin.decorations },
-	);
-}
-
-// The hover popup, on the underlined word. A tooltip this plugin owns rather than
-// CodeMirror's lint hover, which dismissed itself the instant it appeared because
-// its `hideOn` fires on any change. `tooltipFilter` below keeps the lint hover
-// from competing with this one for the same pointer.
+// The hover popup on an underlined phrase. Reads the same field the underlines
+// read, so the two cannot disagree.
 function findingsHover(): Extension {
 	return hoverTooltip(
 		(view, pos): Tooltip | null => {
-			const covering = currentFindings(view.state).filter(
+			const covering = findingsIn(view.state).filter(
 				(d) => pos >= d.start && pos <= d.end,
 			);
 			if (covering.length === 0) {
@@ -210,12 +237,12 @@ function findingsHover(): Extension {
 					return {
 						dom,
 						// The container is CodeMirror's and is shared with every
-						// other hover tooltip in the app, so styling
-						// `.cm-tooltip-hover` on its own would restyle other
-						// plugins' tooltips too. Tagging it here lets styles.css
-						// theme only the containers holding this plugin's popup.
-						// `mount` runs once the tooltip is in the DOM, which is
-						// the first point the parent exists.
+						// other hover tooltip in the app, so theming
+						// `.cm-tooltip-hover` alone would restyle other plugins'
+						// tooltips. Tagging it here lets styles.css theme only
+						// the containers holding this plugin's popup. `mount`
+						// runs once the tooltip is in the DOM, which is the
+						// first point the parent exists.
 						mount() {
 							dom.parentElement?.classList.add(
 								'plumbline-tooltip',
@@ -225,99 +252,106 @@ function findingsHover(): Extension {
 				},
 			};
 		},
-		// Closed when the user edits or moves the selection, because the popup's
-		// content is a snapshot: CodeMirror maps the tooltip's range through a
-		// change but never re-runs the hover source, so a popup left open across
-		// an edit can go on describing a finding the prose no longer has.
-		//
-		// This is NOT the flash that made the lint hover unusable. That came from
-		// CodeMirror's own `hideOn`, which fires on `setDiagnosticsEffect`, so
-		// every debounced pass dismissed the popup without the user doing
-		// anything. `hideOnChange` fires on `tr.docChanged || tr.selection`, and
-		// the linter's diagnostic transaction has neither.
-		{ hoverTime: HOVER_TIME, hideOnChange: true },
+		{
+			hoverTime: HOVER_TIME,
+			// Closed when the user edits or moves the selection, because the
+			// popup's content is a snapshot: CodeMirror maps the tooltip's range
+			// through a change but never re-runs the hover source, so a popup
+			// left open across an edit can describe a finding the prose no longer
+			// has. This is not the flash that made CodeMirror's lint hover
+			// unusable; that fired on the diagnostic transaction, which has
+			// neither `docChanged` nor `selection`.
+			hideOnChange: true,
+		},
 	);
 }
 
-// The editor integration. One debounced engine pass feeds three surfaces: the
-// coverage underlines, the hover popup, and the per-paragraph gutter bar.
+// The per-paragraph severity bar.
 //
-// `markerFilter` is deliberately NOT used to hide CodeMirror's own inline marks,
-// even though that reads like the obvious lever. LintState.init applies
-// markerFilter BEFORE building the diagnostic set, and forEachDiagnostic reads
-// that same set, so filtering there would hide the findings from the underline
-// layer and the hover as well. CodeMirror's marks are suppressed in styles.css
-// through `markClass` instead, and `tooltipFilter` (applied at render time, so it
-// does not touch the stored set) suppresses the lint hover.
+// CodeMirror renders one gutter element per LOGICAL line, stretched to the full
+// height of the wrapped block, so a 1197-character paragraph is a single element
+// several hundred pixels tall. Measured over CDP. That makes the marker a tall
+// block whose height already tracks paragraph length, so it is drawn as a bar
+// rather than a dot: colour carries the worst severity, length carries how much
+// prose the findings cover.
+//
+// The gutter cannot address a phrase, only a paragraph. That is CodeMirror's
+// ceiling; the underline and the panel carry phrase-level location, and the
+// tooltip here answers the question a density signal can answer.
+class SeverityBar extends GutterMarker {
+	constructor(
+		private readonly severity: Severity,
+		private readonly title: string,
+	) {
+		super();
+	}
+
+	override eq(other: GutterMarker): boolean {
+		return (
+			other instanceof SeverityBar &&
+			other.severity === this.severity &&
+			other.title === this.title
+		);
+	}
+
+	override toDOM(): Node {
+		const el = createDiv({
+			cls: `plumbline-gutter-bar plumbline-gutter-bar-${this.severity}`,
+		});
+		// A native title rather than a tooltip extension. CodeMirror's tooltip
+		// layer is shared, and the gutter summary is a one-line string, so there
+		// is nothing here worth taking a shared surface for. aria-label so the
+		// same text reaches a screen reader.
+		el.setAttribute('title', this.title);
+		el.setAttribute('aria-label', this.title);
+		return el;
+	}
+}
+
+function severityGutter(): Extension {
+	return gutter({
+		class: 'plumbline-gutter',
+		lineMarker: (view, line) => {
+			const severities: Severity[] = [];
+			view.state
+				.field(findingsField)
+				.between(line.from, line.to, (_from, _to, value) => {
+					severities.push(value.diagnostic.severity);
+				});
+			if (severities.length === 0) {
+				return null;
+			}
+			const summary = summarizeSeverities(severities);
+			return new SeverityBar(summary.severity, summary.message);
+		},
+		// Without this the gutter only recomputes on a document change, so a
+		// debounced pass that adds findings to an unedited line would not draw
+		// its bar until the next keystroke.
+		lineMarkerChange: (update) =>
+			update.startState.field(findingsField) !==
+			update.state.field(findingsField),
+	});
+}
+
+// The editor integration. One debounced engine pass into one private state field,
+// read by three surfaces this plugin owns outright.
 //
 // `getConfig` is read on each pass so the active profile and any vault overrides
 // are current.
 export function plumblineDecorations(
 	getConfig: () => ResolvedConfig,
 ): Extension {
-	const source = (view: EditorView): CmDiagnostic[] => {
-		const result = lint(view.state.doc.toString(), getConfig());
-		const docLength = view.state.doc.length;
-		const diagnostics: PlumblineDiagnostic[] = [];
-		for (const d of result.diagnostics) {
-			if (d.end > d.start && d.end <= docLength) {
-				diagnostics.push({
-					from: d.start,
-					to: d.end,
-					severity: cmSeverity(d.severity),
-					message: d.message,
-					// Hidden in styles.css. The class exists only to give that
-					// rule something to target; the visible underline is the
-					// coverage-segment layer.
-					markClass: 'plumbline-flag',
-					plumbline: d,
-				});
-			}
-		}
-		return diagnostics;
-	};
-	const needsRefresh = (update: ViewUpdate): boolean =>
-		update.transactions.some((tr) =>
-			tr.effects.some((effect) => effect.is(configChanged)),
-		);
 	return [
-		// Marks editors carrying this extension, so the CodeMirror gutter
-		// overrides in styles.css apply here and not to any other extension's
-		// lint gutter.
-		EditorView.editorAttributes.of({ class: 'plumbline-editor' }),
-		linter(source, {
-			delay: LINT_DELAY,
-			needsRefresh,
-			tooltipFilter: () => [],
-		}),
-		// Both filters restrict the gutter to THIS plugin's findings. Another
-		// extension registering its own linter puts diagnostics into the same
-		// lint state, and without these the bar's severity would be computed
-		// over a foreign plugin's errors while the summary counted them as
-		// suggestions.
-		//
-		// This `markerFilter` is `lintGutterConfig`'s, which is a different facet
-		// from `linter()`'s and is applied in the lintGutterMarkers StateField
-		// straight off setDiagnosticsEffect. It does NOT feed LintState, so
-		// unlike the one on `linter()` it cannot blind forEachDiagnostic. Do not
-		// conflate the two.
-		lintGutter({
-			markerFilter: (ds) => ds.filter(isPlumblineDiagnostic),
-			tooltipFilter: (ds) => {
-				const mine = ds.filter(isPlumblineDiagnostic);
-				return mine.length === 0 ? [] : [gutterTooltip(mine)];
-			},
-		}),
-		segmentUnderlines(),
+		findingsField,
+		findingsPass(getConfig),
+		EditorView.decorations.compute([findingsField], buildUnderlines),
+		severityGutter(),
 		findingsHover(),
 	];
 }
 
-// Re-run the engine and redraw now, without waiting for the next edit. Called when
-// the config changes (profile switch, rule toggle, config reload). The dispatched
-// effect makes the linter treat the config as changed via needsRefresh, and
-// forceLinting then runs the pass immediately instead of after the debounce.
+// Re-run the engine and redraw now, without waiting for the debounce. Called when
+// the config changes (profile switch, rule toggle, config reload).
 export function relintEditor(view: EditorView): void {
 	view.dispatch({ effects: configChanged.of(null) });
-	forceLinting(view);
 }
