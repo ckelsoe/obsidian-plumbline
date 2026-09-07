@@ -240,3 +240,34 @@ describe('buildPanelModel: the cap binds on collapsed groups', () => {
 		expect(m.hidden).toBe(0);
 	});
 });
+
+// The summary is a claim about the PROSE, not about what the panel happens to be
+// drawing. Counting the visible rows made a paragraph with 30 warnings read
+// "25 warnings" with a "Show 5 more" sitting under it.
+describe('sectionSummary is not affected by the cap or the floor', () => {
+	it('counts every warning in the paragraph, not the capped rows', () => {
+		const findings = Array.from({ length: 30 }, (_, i) =>
+			finding(`r${String(i).padStart(3, '0')}`, 'warning', [i]),
+		);
+		const m = buildPanelModel(TEXT, findings, 25);
+		const s = m.sections[0];
+		expect(s?.rows).toHaveLength(25);
+		expect(m.hidden).toBe(5);
+		expect(s && sectionSummary(s)).toBe('30 warnings');
+	});
+
+	it('counts collapsed suggestions even when the group did not fit', () => {
+		const m = buildPanelModel(
+			TEXT,
+			[
+				finding('w', 'warning', [0]),
+				finding('s', 'suggestion', [10, 20, 30]),
+			],
+			1,
+		);
+		const s = m.sections[0];
+		// The group is dropped from the section, but it still happened.
+		expect(s?.collapsed.rows).toHaveLength(0);
+		expect(s && sectionSummary(s)).toBe('1 warning, 3 suggestions');
+	});
+});

@@ -113,7 +113,15 @@
 	border-left: 2px solid var(--background-modifier-border);
 }
 
+/* A <button>, so it is keyboard reachable; reset to read as a list entry. */
 .plumbline-occurrence {
+	display: block;
+	width: 100%;
+	text-align: left;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	font-size: var(--font-ui-smaller);
 	padding: 2px 0;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);

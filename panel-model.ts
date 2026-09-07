@@ -34,6 +34,11 @@ export interface PanelSection {
 	start: number;
 	end: number;
 	rows: PanelRow[];
+	// Occurrence counts for the WHOLE paragraph, before the cap and before the
+	// floor. The summary is a claim about the prose, not about what the panel
+	// happens to be drawing, so counting the visible rows made a paragraph with
+	// 30 warnings read "25 warnings" while a "Show 5 more" sat under it.
+	counts: Record<Severity, number>;
 	// Collapsed suggestions for this paragraph. `rows` is what expanding shows.
 	//
 	// `count` is OCCURRENCES, not rules, so the button and the section header
@@ -100,6 +105,16 @@ export function buildPanelModel(
 		}
 		if (rows.length === 0 && collapsed.length === 0) continue;
 
+		// Counted from everything found in this paragraph, before any capping.
+		const counts: Record<Severity, number> = {
+			error: 0,
+			warning: 0,
+			suggestion: 0,
+		};
+		for (const r of [...rows, ...collapsed]) {
+			counts[r.severity] += r.occurrences.length;
+		}
+
 		rows.sort(
 			(a, b) =>
 				b.priority - a.priority || a.ruleSlug.localeCompare(b.ruleSlug),
@@ -136,6 +151,7 @@ export function buildPanelModel(
 			start: para.start,
 			end: para.end,
 			rows: kept,
+			counts,
 			collapsed: fitsCollapsed
 				? {
 						count: collapsed.reduce(
@@ -155,14 +171,9 @@ export function buildPanelModel(
 // look before reading any row. Same shape the gutter bar uses, deliberately: the
 // two describe the same paragraph and disagreeing would be worse than repeating.
 export function sectionSummary(section: PanelSection): string {
-	const counts = new Map<Severity, number>();
-	for (const r of [...section.rows, ...section.collapsed.rows]) {
-		const n = r.occurrences.length;
-		counts.set(r.severity, (counts.get(r.severity) ?? 0) + n);
-	}
 	const parts: string[] = [];
 	for (const sev of ['error', 'warning', 'suggestion'] as const) {
-		const n = counts.get(sev) ?? 0;
+		const n = section.counts[sev];
 		if (n > 0) parts.push(`${n} ${sev}${n === 1 ? '' : 's'}`);
 	}
 	return parts.join(', ');

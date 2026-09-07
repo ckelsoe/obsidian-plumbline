@@ -71,6 +71,29 @@ export class FindingsView extends ItemView {
 		this.render();
 	}
 
+	// Every toggle in this panel re-renders the whole list, which empties
+	// contentEl and throws away the element the reader was standing on. For a
+	// mouse that is invisible; for a keyboard it drops focus to the document and
+	// the next Tab starts from the top, so expanding one group costs the reader
+	// their place. Focus is keyed on a stable id rather than a DOM reference,
+	// because the element itself does not survive the repaint.
+	private focusKey: string | undefined;
+
+	private restoreFocus(): void {
+		if (this.focusKey === undefined) return;
+		const el = this.contentEl.querySelector(
+			`[data-plumbline-focus="${CSS.escape(this.focusKey)}"]`,
+		);
+		if (el instanceof HTMLElement) el.focus();
+	}
+
+	// Re-render, then put the reader back where they were.
+	private rerender(focusKey: string): void {
+		this.focusKey = focusKey;
+		this.render();
+		this.restoreFocus();
+	}
+
 	private render(): void {
 		const container = this.contentEl;
 		container.empty();
@@ -110,8 +133,13 @@ export class FindingsView extends ItemView {
 				text: `Show ${model.hidden} more`,
 				attr: { type: 'button' },
 			});
+			more.setAttribute('data-plumbline-focus', 'show-all');
 			more.addEventListener('click', () => {
 				this.showAll = true;
+				// No focus key: the button it would restore to is gone, since
+				// showing everything is what removes it. Focus falls to the
+				// document, which is correct here rather than a regression.
+				this.focusKey = undefined;
 				this.render();
 			});
 		}
@@ -158,12 +186,13 @@ export class FindingsView extends ItemView {
 			// Occurrences, matching the section header. Counting rules here put
 			// "1 suggestion" under a header reading "5 suggestions".
 			const n = section.collapsed.count;
+			const focusKey = `collapsed:${key}`;
 			const toggle = wrap.createEl('button', {
 				cls: 'plumbline-collapsed',
 				text: open
 					? `Hide ${n} suggestion${n === 1 ? '' : 's'}`
 					: `${n} suggestion${n === 1 ? '' : 's'}`,
-				attr: { type: 'button' },
+				attr: { type: 'button', 'data-plumbline-focus': focusKey },
 			});
 			toggle.addEventListener('click', () => {
 				if (open) {
@@ -171,7 +200,7 @@ export class FindingsView extends ItemView {
 				} else {
 					this.expanded.add(key);
 				}
-				this.render();
+				this.rerender(focusKey);
 			});
 			if (open) {
 				for (const row of section.collapsed.rows) {
@@ -224,20 +253,29 @@ export class FindingsView extends ItemView {
 		// A row standing for several hits expands to them rather than only ever
 		// jumping to the first, which is what "x12" would otherwise hide.
 		if (count > 1) {
+			row.setAttribute('data-plumbline-focus', `row:${key}`);
 			row.addEventListener('click', () => {
 				if (open) {
 					this.expanded.delete(key);
 				} else {
 					this.expanded.add(key);
 				}
-				this.render();
+				this.rerender(`row:${key}`);
 			});
 			if (open) {
 				const occ = row.createDiv({ cls: 'plumbline-occurrences' });
 				for (const [i, o] of panelRow.occurrences.entries()) {
-					const item = occ.createDiv({
+					const text = docText.slice(o.start, o.end);
+					// Buttons, not clickable divs. Stepping through the places a
+					// rule fired is the reason a grouped row expands at all, and
+					// a keyboard user has to be able to do it.
+					const item = occ.createEl('button', {
 						cls: 'plumbline-occurrence',
-						text: `${i + 1}. ${docText.slice(o.start, o.end)}`,
+						text: `${i + 1}. ${text}`,
+						attr: {
+							type: 'button',
+							'aria-label': `Occurrence ${i + 1} of ${panelRow.occurrences.length}: ${text}`,
+						},
 					});
 					item.addEventListener('click', (e) => {
 						e.stopPropagation();
