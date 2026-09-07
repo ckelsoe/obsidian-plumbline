@@ -250,7 +250,12 @@ function findingsHover(): Extension {
 				(d) => d.start <= seg.start && d.end >= seg.end,
 			);
 			const start = seg.start;
-			const end = seg.end;
+			// `seg.end` is exclusive, but CodeMirror's hover persistence check is
+			// inclusive on both sides (`isOverRange`: `pos >= from && pos <= to`),
+			// so passing it verbatim kept the popup alive one position into the
+			// NEXT segment and showed its messages over that boundary character.
+			// The last position this segment actually covers is `end - 1`.
+			const end = Math.max(seg.start, seg.end - 1);
 			return {
 				pos: start,
 				end,
@@ -270,12 +275,27 @@ function findingsHover(): Extension {
 						// the containers holding this plugin's popup. `mount`
 						// runs once the tooltip is in the DOM, which is the
 						// first point the parent exists.
-						// The container is captured here rather than looked up
-						// again in destroy(). CodeMirror detaches `dom` before
-						// calling destroy(), so `dom.parentElement` is null by
-						// then and the class would be left behind on a container
-						// it can reuse for the next tooltip, theming another
-						// extension's hover with this plugin's colours.
+						// Theming the shared host is a deliberate trade-off, not
+						// isolation, and the honest version is this: CodeMirror
+						// merges hovers at the same position into ONE host, so if
+						// another extension ever shows a hover over the same range
+						// its section inherits these colours for as long as this
+						// popup is up.
+						//
+						// The alternative is worse and was measured. With no host
+						// theming the container computes to a 245,245,245
+						// background under Obsidian's dark theme while the text
+						// stays white: CodeMirror's own dark tooltip rule does not
+						// win, so the message is unreadable. A guaranteed
+						// unreadable popup on every dark theme is not a trade for
+						// a hypothetical collision with an extension that would
+						// have to hover the same characters.
+						//
+						// The class is scoped as tightly as it can be: added on
+						// mount, removed on destroy, and never left behind. The
+						// container is captured here rather than looked up again
+						// in destroy(), because CodeMirror detaches `dom` first,
+						// so `dom.parentElement` is null by then.
 						mount() {
 							host = dom.parentElement;
 							host?.classList.add('plumbline-tooltip');
