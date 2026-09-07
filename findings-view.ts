@@ -1,5 +1,5 @@
 import { ItemView, MarkdownView, WorkspaceLeaf } from 'obsidian';
-import { Diagnostic, LintResult } from './engine/types';
+import { Finding, LintResult, Occurrence } from './engine/types';
 import type PlumblinePlugin from './main';
 
 export const FINDINGS_VIEW_TYPE = 'plumbline-findings';
@@ -57,57 +57,78 @@ export class FindingsView extends ItemView {
 			});
 			return;
 		}
-		if (this.result.diagnostics.length === 0) {
+		if (this.result.findings.length === 0) {
 			container.createEl('p', {
 				cls: 'plumbline-findings-empty',
 				text: 'No flags in this note.',
 			});
 			return;
 		}
+		// One row per RULE, in priority order, rather than one per hit in
+		// document order. A chapter that fires the same rule fifteen times is one
+		// row saying so. The engine did the grouping and ranking (PL-B), so the
+		// panel, the report and the CLI cannot disagree about the count.
+		//
+		// Paragraph grouping, the severity floor and the row cap are PL-C.
 		const docText = this.targetView.editor.getValue();
 		const list = container.createDiv({ cls: 'plumbline-findings-list' });
-		for (const diagnostic of this.result.diagnostics) {
-			this.renderRow(list, diagnostic, docText);
+		for (const finding of this.result.findings) {
+			this.renderRow(list, finding, docText);
 		}
 	}
 
 	private renderRow(
 		list: HTMLElement,
-		diagnostic: Diagnostic,
+		finding: Finding,
 		docText: string,
 	): void {
 		const targetView = this.targetView;
 		if (!targetView) {
 			return;
 		}
-		const pos = targetView.editor.offsetToPos(diagnostic.start);
+		const first = finding.occurrences[0];
+		if (first === undefined) {
+			return;
+		}
+		const count = finding.occurrences.length;
+		const pos = targetView.editor.offsetToPos(first.start);
 		const row = list.createDiv({ cls: 'plumbline-finding' });
 		const head = row.createDiv({ cls: 'plumbline-finding-head' });
 		head.createSpan({
 			cls: 'plumbline-finding-text',
-			text: docText.slice(diagnostic.start, diagnostic.end),
+			text: docText.slice(first.start, first.end),
 		});
+		// The count is what makes a grouped row readable: without it a rule that
+		// fired fifteen times looks the same as one that fired once.
+		if (count > 1) {
+			head.createSpan({
+				cls: 'plumbline-finding-count',
+				text: `x${count}`,
+			});
+		}
 		head.createSpan({
 			cls: 'plumbline-finding-line',
 			text: `L${pos.line + 1}`,
 		});
 		row.createDiv({
 			cls: 'plumbline-finding-msg',
-			text: diagnostic.message,
+			text: finding.message,
 		});
+		// Clicking a grouped row goes to the FIRST occurrence. Expanding to the
+		// rest is PL-C; jumping somewhere is better than jumping nowhere.
 		row.addEventListener('click', () => {
-			this.jumpTo(diagnostic);
+			this.jumpTo(first);
 		});
 	}
 
-	private jumpTo(diagnostic: Diagnostic): void {
+	private jumpTo(occurrence: Occurrence): void {
 		const targetView = this.targetView;
 		if (!targetView) {
 			return;
 		}
 		const editor = targetView.editor;
-		const from = editor.offsetToPos(diagnostic.start);
-		const to = editor.offsetToPos(diagnostic.end);
+		const from = editor.offsetToPos(occurrence.start);
+		const to = editor.offsetToPos(occurrence.end);
 		void this.plugin.app.workspace.revealLeaf(targetView.leaf);
 		editor.focus();
 		editor.setSelection(from, to);
