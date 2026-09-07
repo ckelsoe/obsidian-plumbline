@@ -30,13 +30,17 @@ const ANNOTECA_OPENER = /^<!--\s*annoteca\//;
 
 // Leading YAML frontmatter: `---` on the first line through the next `---` line.
 function frontmatterSpan(text: string): Span | null {
-	if (!/^---[ \t]*\n/.test(text)) {
+	// `\r?` on both fences: a vault synced from Windows has CRLF notes, and
+	// without it their frontmatter is not masked at all, so rules fire inside
+	// YAML and a directive-shaped string in a frontmatter value counts as a
+	// directive.
+	if (!/^---[ \t]*\r?\n/.test(text)) {
 		return null;
 	}
 	// Append a newline so a document that ends right after the closing fence,
 	// with no trailing newline, still matches. No lookbehind: `(?<=...)` is a
 	// parse error in JavaScriptCore before iOS 16.4.
-	const closing = /\n---[ \t]*\n/g;
+	const closing = /\r?\n---[ \t]*\r?\n/g;
 	const match = closing.exec(text + '\n');
 	if (match === null) {
 		return null;
@@ -48,6 +52,21 @@ function frontmatterSpan(text: string): Span | null {
 	};
 }
 
+// A fence marker: which character opens it and how many of them. Counted rather
+// than matched, so there is no pattern whose complexity has to be argued about.
+interface Fence {
+	char: string;
+	length: number;
+}
+
+function fenceAt(trimmed: string): Fence | null {
+	const char = trimmed[0];
+	if (char !== '`' && char !== '~') return null;
+	let length = 0;
+	while (trimmed[length] === char) length++;
+	return length >= 3 ? { char, length } : null;
+}
+
 // Fenced code blocks and ATX headings, found by a single forward line scan so
 // the logic stays linear and never backtracks.
 function lineSpans(text: string): Span[] {
@@ -55,18 +74,31 @@ function lineSpans(text: string): Span[] {
 	let offset = 0;
 	let inFence = false;
 	let fenceStart = 0;
+	let open: Fence | null = null;
 	for (const line of text.split('\n')) {
 		const lineStart = offset;
 		const lineEnd = offset + line.length;
 		const trimmed = line.trimStart();
-		const isFence = trimmed.startsWith('```') || trimmed.startsWith('~~~');
+		const fence = fenceAt(trimmed);
 		if (inFence) {
-			if (isFence) {
+			// Markdown closes a fence only with the same character, at least as
+			// many of them. Treating any fence line as a closer ended a
+			// ````-delimited block at the first ``` inside it, which is exactly
+			// how anyone writes a fenced example OF a fenced block, and let a
+			// `~~~` close a ``` block.
+			if (
+				fence &&
+				open &&
+				fence.char === open.char &&
+				fence.length >= open.length
+			) {
 				spans.push({ start: fenceStart, end: lineEnd, kind: 'code' });
 				inFence = false;
+				open = null;
 			}
-		} else if (isFence) {
+		} else if (fence) {
 			inFence = true;
+			open = fence;
 			fenceStart = lineStart;
 		} else if (/^#{1,6}(?:\s|$)/.test(trimmed)) {
 			spans.push({ start: lineStart, end: lineEnd, kind: 'heading' });

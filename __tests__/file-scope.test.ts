@@ -255,6 +255,46 @@ describe('fileScope: what is not a directive', () => {
 		).toHaveLength(1);
 	});
 
+	// The three shapes the literal-span guard missed on its first pass, all found
+	// by review. Each one silenced the rest of a note.
+	it('ignores one inside a four-backtick fence around a three-backtick example', () => {
+		const text = [
+			'````markdown',
+			'```',
+			'<!-- plumbline: off -->',
+			'```',
+			'````',
+			'',
+			'Prose after.',
+		].join('\n');
+		expect(fileScope(text).skipRanges).toEqual([]);
+	});
+
+	it('ignores one after a tilde line inside a backtick fence', () => {
+		const text = [
+			'```',
+			'code',
+			'~~~',
+			'<!-- plumbline: off -->',
+			'```',
+		].join('\n');
+		expect(fileScope(text).skipRanges).toEqual([]);
+	});
+
+	it('ignores one inside CRLF frontmatter', () => {
+		const text = '---\r\nnote: "<!-- plumbline: off -->"\r\n---\r\nProse.';
+		expect(fileScope(text).skipRanges).toEqual([]);
+	});
+
+	// CRLF notes are read the same way everywhere, not only excluded.
+	it('reads frontmatter keys from a CRLF note', () => {
+		const text =
+			'---\r\nplumbline-profile: technical\r\nplumbline-disabled-rules: [anaphora]\r\n---\r\nProse.';
+		const scope = fileScope(text);
+		expect(scope.profileId).toBe('technical');
+		expect(scope.disabledSlugs).toEqual(['anaphora']);
+	});
+
 	it('ignores an unterminated comment', () => {
 		// `<!-- plumbline: off >` is a writer mid-keystroke, not an instruction to
 		// stop checking everything below it.

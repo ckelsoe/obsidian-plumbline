@@ -143,3 +143,90 @@ describe('maskSpans', () => {
 		expect(masked.length).toBe(text.length);
 	});
 });
+
+// A fence closes only on the same character, at least as many of them. All three
+// of these were live: the first is how anyone writes a fenced example OF a
+// fenced block, which is exactly how this plugin's own directives get
+// documented, and an early close leaves the rest of the example unmasked.
+describe('protectedSpans: fence matching', () => {
+	const masked = (text: string) =>
+		maskSpans(text, protectedSpans(text, config));
+
+	it('does not close a four-backtick fence on an inner three-backtick line', () => {
+		const text = [
+			'````markdown',
+			'```',
+			'<!-- plumbline: off -->',
+			'```',
+			'````',
+			'',
+			'After.',
+		].join('\n');
+		expect(protectedSpans(text, config)).toEqual([
+			{ start: 0, end: text.indexOf('\n\nAfter.'), kind: 'code' },
+		]);
+		expect(masked(text)).toContain('After.');
+		expect(masked(text)).not.toContain('plumbline');
+	});
+
+	it('does not close a backtick fence with a tilde fence', () => {
+		const text = ['```', 'code', '~~~', 'still code', '```', 'After.'].join(
+			'\n',
+		);
+		expect(protectedSpans(text, config)).toEqual([
+			{ start: 0, end: text.indexOf('\nAfter.'), kind: 'code' },
+		]);
+	});
+
+	it('closes a fence with a longer run of the same character', () => {
+		// Markdown allows the closer to be longer than the opener, only not
+		// shorter.
+		const text = ['```', 'code', '`````', 'After.'].join('\n');
+		expect(protectedSpans(text, config)).toEqual([
+			{ start: 0, end: text.indexOf('\nAfter.'), kind: 'code' },
+		]);
+	});
+
+	// Tildes open a fence too. Without this, dropping tilde support entirely
+	// still passed every other assertion here, since they only check that a
+	// tilde does not CLOSE a backtick fence.
+	it('protects a tilde-fenced block', () => {
+		const text = ['Intro.', '~~~js', 'const a = 1;', '~~~', 'After.'].join(
+			'\n',
+		);
+		expect(protectedSpans(text, config)).toEqual([
+			{ start: 7, end: text.indexOf('\nAfter.'), kind: 'code' },
+		]);
+	});
+
+	it('ignores a run of fewer than three fence characters', () => {
+		expect(protectedSpans('``\nnot a fence\n``', config)).toEqual([]);
+	});
+});
+
+// A vault synced from Windows has CRLF notes. Without the `\r?` on both fences
+// their frontmatter was not masked at all, so rules fired inside YAML.
+describe('protectedSpans: CRLF frontmatter', () => {
+	it('masks frontmatter in a CRLF note', () => {
+		const text = '---\r\ntitle: A note\r\n---\r\nProse here.';
+		expect(protectedSpans(text, config)).toEqual([
+			{ start: 0, end: text.indexOf('Prose'), kind: 'frontmatter' },
+		]);
+	});
+
+	it('masks frontmatter in a CRLF note that ends at the closing fence', () => {
+		const text = '---\r\ntitle: A note\r\n---';
+		expect(protectedSpans(text, config)).toEqual([
+			{ start: 0, end: text.length, kind: 'frontmatter' },
+		]);
+	});
+
+	// The control: the LF form was already handled, so the two assertions above
+	// are about the `\r`, not about frontmatter detection in general.
+	it('still masks frontmatter in an LF note', () => {
+		const text = '---\ntitle: A note\n---\nProse here.';
+		expect(protectedSpans(text, config)).toEqual([
+			{ start: 0, end: text.indexOf('Prose'), kind: 'frontmatter' },
+		]);
+	});
+});
