@@ -337,10 +337,15 @@ class SeverityBar extends GutterMarker {
 		});
 		// A native title rather than a tooltip extension. CodeMirror's tooltip
 		// layer is shared, and the gutter summary is a one-line string, so there
-		// is nothing here worth taking a shared surface for. aria-label so the
-		// same text reaches a screen reader.
+		// is nothing here worth taking a shared surface for.
+		//
+		// No aria-label, deliberately. CodeMirror sets aria-hidden="true" on the
+		// `.cm-gutters` ancestor (verified in the running app), so nothing in
+		// this subtree reaches the accessibility tree and a label here would be
+		// decoration that only looks like an accommodation. The bar is a visual
+		// density signal; the findings panel is the accessible surface, and it
+		// lists every finding with its message.
 		el.setAttribute('title', this.title);
-		el.setAttribute('aria-label', this.title);
 		return el;
 	}
 }
