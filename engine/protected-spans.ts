@@ -9,6 +9,12 @@ export const HTML_COMMENT_KIND = 'html-comment';
 
 // The base protected-span sources every profile starts with. Packs contribute
 // more (scripture quotes, dialogue); a profile selects which are active.
+// A region the note itself opted out of, between plumbline off/on directives
+// (PL-D). Not in BASE_SPAN_KINDS: those are the kinds a profile can turn on and
+// off, and a writer who wrote "skip this" in the note is not asking for a
+// setting to be consulted.
+export const SKIP_KIND = 'plumbline-skip';
+
 export const BASE_SPAN_KINDS = [
 	'frontmatter',
 	'code',
@@ -128,6 +134,33 @@ function mergeSpans(spans: Span[]): Span[] {
 		}
 	}
 	return merged;
+}
+
+// Code and frontmatter, found without a config.
+//
+// Per-file scoping has to run BEFORE the config is resolved, because the note's
+// own `plumbline-profile` is what selects the profile. So it cannot call
+// protectedSpans(), which takes a ResolvedConfig: that is a cycle. These three
+// detectors take only text, which is what makes the cycle avoidable.
+//
+// It exists so a directive-shaped string inside a fence, an inline code span or
+// the frontmatter block is read as the text it is. Documenting `<!-- plumbline:
+// off -->` inside a fenced example is the obvious way to write about this
+// feature, and without this it would silently stop linting the rest of the note.
+//
+// lint() ends up running these detectors twice, once here and once inside
+// protectedSpans. Two linear passes over one note, which is cheaper than
+// threading a partial span list through a function whose whole value is that
+// it is pure over the text.
+export function literalSpans(text: string): Span[] {
+	const collected: Span[] = [];
+	const frontmatter = frontmatterSpan(text);
+	if (frontmatter) collected.push(frontmatter);
+	for (const span of lineSpans(text)) {
+		if (span.kind === 'code') collected.push(span);
+	}
+	collected.push(...inlineCodeSpans(text));
+	return mergeSpans(collected);
 }
 
 // The protected-span pass: runs before any rule and returns the spans a rule or

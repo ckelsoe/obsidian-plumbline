@@ -106,7 +106,7 @@ function findingsIn(state: EditorState): Diagnostic[] {
 
 // Runs the engine, debounced, and pushes the result into the field. The only
 // caller of lint() in the editor path.
-function findingsPass(getConfig: () => ResolvedConfig): Extension {
+function findingsPass(getConfig: (text: string) => ResolvedConfig): Extension {
 	return ViewPlugin.fromClass(
 		class {
 			private timer: number | null = null;
@@ -157,10 +157,11 @@ function findingsPass(getConfig: () => ResolvedConfig): Extension {
 				if (this.destroyed) {
 					return;
 				}
-				const result = lint(
-					this.view.state.doc.toString(),
-					getConfig(),
-				);
+				// The text goes to getConfig as well as to lint. The note's own
+				// `plumbline-profile` selects which packs are active, and that
+				// has to be decided before the config is resolved.
+				const text = this.view.state.doc.toString();
+				const result = lint(text, getConfig(text));
 				this.view.dispatch({
 					effects: setFindings.of(result.diagnostics),
 				});
@@ -413,7 +414,7 @@ function severityGutter(): Extension {
 // `getConfig` is read on each pass so the active profile and any vault overrides
 // are current.
 export function plumblineDecorations(
-	getConfig: () => ResolvedConfig,
+	getConfig: (text: string) => ResolvedConfig,
 ): Extension {
 	return [
 		findingsField,

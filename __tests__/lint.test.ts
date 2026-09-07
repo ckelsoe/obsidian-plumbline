@@ -125,3 +125,95 @@ describe('lint with the scripture profile', () => {
 		expect(slugs).toContain('devotional-register');
 	});
 });
+
+// PL-D. The scoping decision is made inside lint(), so the editor, the CLI and
+// the JSON report cannot disagree about which rules ran on a note. These drive
+// it through lint() for that reason, rather than through fileScope() alone.
+//
+// `reader-direction` is a mechanical rule the config carries and `anaphora` is a
+// heuristic, so both filtering paths are exercised.
+describe('lint per-file scoping', () => {
+	const ANAPHORA = [
+		'The Lord is near. The Lord is kind. The Lord is faithful.',
+		'The Lord is good.',
+	].join(' ');
+	const slugs = (text: string): string[] => [
+		...new Set(lint(text, config).diagnostics.map((d) => d.ruleSlug)),
+	];
+
+	it('runs both rules with no scoping, which the rest of these rely on', () => {
+		expect(slugs(`Read that again.\n\n${ANAPHORA}`).sort()).toEqual([
+			'anaphora',
+			'reader-direction',
+		]);
+	});
+
+	it('disables a mechanical rule from frontmatter', () => {
+		const text = [
+			'---',
+			'plumbline-disabled-rules: [reader-direction]',
+			'---',
+			'Read that again.',
+			'',
+			ANAPHORA,
+		].join('\n');
+		expect(slugs(text)).toEqual(['anaphora']);
+	});
+
+	it('disables a heuristic from a directive', () => {
+		const text = [
+			'<!-- plumbline: disable anaphora -->',
+			'Read that again.',
+			'',
+			ANAPHORA,
+		].join('\n');
+		expect(slugs(text)).toEqual(['reader-direction']);
+	});
+
+	it('returns no diagnostics when the note opts out entirely', () => {
+		const text = [
+			'---',
+			'plumbline-disabled-rules: all',
+			'---',
+			'Read that again.',
+			'',
+			ANAPHORA,
+		].join('\n');
+		const result = lint(text, config);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.findings).toEqual([]);
+		// Metrics still describe the prose. Opting out of the rules is not opting
+		// out of being counted, and the rhythm panel keeps working.
+		expect(result.metrics.sentences).toBeGreaterThan(0);
+	});
+
+	it('does not flag inside a skipped region, and still flags outside it', () => {
+		const text = [
+			'<!-- plumbline: off -->',
+			'Read that again.',
+			'<!-- plumbline: on -->',
+			'',
+			'Read that again.',
+		].join('\n');
+		const hits = lint(text, config).diagnostics.filter(
+			(d) => d.ruleSlug === 'reader-direction',
+		);
+		expect(hits).toHaveLength(1);
+		// The surviving hit is the one AFTER the region, not the one inside it.
+		expect(hits[0]?.start).toBeGreaterThan(text.indexOf('plumbline: on'));
+	});
+
+	// A skipped region is masked rather than filtered afterwards, so it is
+	// invisible to the rhythm metrics too. Burstiness computed over prose the
+	// writer excluded is a wrong number, not a filtered one.
+	it('leaves a skipped region out of the metrics', () => {
+		const prose = 'Sentences here carry seven words each time.';
+		const plain = lint(prose, config).metrics;
+		const scoped = lint(
+			`<!-- plumbline: off -->\nIgnored words go here.\n<!-- plumbline: on -->\n\n${prose}`,
+			config,
+		).metrics;
+		expect(scoped.words).toBe(plain.words);
+		expect(scoped.sentences).toBe(plain.sentences);
+	});
+});
