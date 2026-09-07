@@ -121,12 +121,21 @@ function findingsPass(getConfig: () => ResolvedConfig): Extension {
 			}
 
 			update(update: ViewUpdate): void {
+				// A config change runs at once; only typing is debounced. The
+				// debounce exists to avoid re-linting on every keystroke, and a
+				// profile switch or rule toggle is neither frequent nor a
+				// keystroke. Making it wait 400ms leaves the old underlines and
+				// bars on screen after the user has changed the rules, and breaks
+				// relintEditor's contract, which is that the editor refreshes now.
 				if (
-					update.docChanged ||
 					update.transactions.some((tr) =>
 						tr.effects.some((e) => e.is(configChanged)),
 					)
 				) {
+					this.schedule(0);
+					return;
+				}
+				if (update.docChanged) {
 					this.schedule(LINT_DELAY);
 				}
 			}
@@ -262,6 +271,19 @@ function findingsHover(): Extension {
 			// unusable; that fired on the diagnostic transaction, which has
 			// neither `docChanged` nor `selection`.
 			hideOnChange: true,
+			// A config change can disable the very rule the open popup is
+			// describing, and neither `configChanged` nor the pass that follows it
+			// satisfies `hideOnChange`, so the popup would sit there citing a rule
+			// the user just turned off.
+			//
+			// Deliberately NOT also hiding on `setFindings`. A pass is only ever
+			// scheduled by an edit or a config change: an edit already closed the
+			// popup through `hideOnChange`, and a config change closes it here. The
+			// one case left is a popup re-opened inside the 400ms window after
+			// typing, which would then be dismissed under the pointer when the pass
+			// lands. That is the flash this plugin stopped using CodeMirror's lint
+			// hover to avoid, and it is worse than a message being up to 400ms old.
+			hideOn: (tr) => tr.effects.some((e) => e.is(configChanged)),
 		},
 	);
 }
