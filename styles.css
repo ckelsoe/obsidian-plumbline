@@ -43,7 +43,17 @@
 	background-color: var(--background-modifier-hover);
 }
 
+/* A <button>, so the primary interaction is keyboard reachable; reset so it
+   still reads as the row heading it is. */
 .plumbline-finding-head {
+	width: 100%;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	color: inherit;
+	font-size: inherit;
+	text-align: left;
+	cursor: pointer;
 	display: flex;
 	justify-content: space-between;
 	gap: var(--size-2-3);

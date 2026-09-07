@@ -84,7 +84,7 @@ export class FindingsView extends ItemView {
 		const el = this.contentEl.querySelector(
 			`[data-plumbline-focus="${CSS.escape(this.focusKey)}"]`,
 		);
-		if (el instanceof HTMLElement) el.focus();
+		if (el?.instanceOf(HTMLElement)) el.focus();
 	}
 
 	// Re-render, then put the reader back where they were.
@@ -133,14 +133,24 @@ export class FindingsView extends ItemView {
 				text: `Show ${model.hidden} more`,
 				attr: { type: 'button' },
 			});
-			more.setAttribute('data-plumbline-focus', 'show-all');
 			more.addEventListener('click', () => {
+				// The button being activated is the one that disappears, so there
+				// is nothing to restore to. Focus moves to the FIRST newly
+				// revealed row instead: leaving it to fall to the document drops
+				// the reader out of the panel and restarts Tab somewhere else.
+				const shownBefore = container.querySelectorAll(
+					'.plumbline-finding-head',
+				).length;
 				this.showAll = true;
-				// No focus key: the button it would restore to is gone, since
-				// showing everything is what removes it. Focus falls to the
-				// document, which is correct here rather than a regression.
 				this.focusKey = undefined;
 				this.render();
+				const heads = container.querySelectorAll(
+					'.plumbline-finding-head',
+				);
+				const next = heads.item(shownBefore) ?? heads.item(0);
+				// instanceOf, not instanceof: Obsidian can render a leaf in a
+				// separate window, where HTMLElement is a different constructor.
+				if (next?.instanceOf(HTMLElement)) next.focus();
 			});
 		}
 	}
@@ -226,15 +236,31 @@ export class FindingsView extends ItemView {
 		const count = panelRow.occurrences.length;
 		const key = `${panelRow.ruleSlug}:${first.start}`;
 		const open = this.expanded.has(key);
+		const text = docText.slice(first.start, first.end);
+		const line = targetView.editor.offsetToPos(first.start).line + 1;
 
 		const row = wrap.createDiv({
 			cls: `plumbline-finding plumbline-finding-${panelRow.severity}`,
 		});
-		const head = row.createDiv({ cls: 'plumbline-finding-head' });
-		head.createSpan({
-			cls: 'plumbline-finding-text',
-			text: docText.slice(first.start, first.end),
+
+		// The HEAD is the control, not the row. Making the row itself the button
+		// would nest the occurrence buttons inside it, which is invalid, and
+		// leaving it a clickable div left the primary interaction here reachable
+		// only with a mouse: no focus, no Enter or Space, and restoreFocus()
+		// calling focus() on something that cannot take it.
+		const head = row.createEl('button', {
+			cls: 'plumbline-finding-head',
+			attr: {
+				type: 'button',
+				'data-plumbline-focus': `row:${key}`,
+				'aria-label':
+					count > 1
+						? `${text}, ${count} occurrences, line ${line}. ${open ? 'Collapse' : 'Expand'}`
+						: `${text}, line ${line}. ${panelRow.message}`,
+				...(count > 1 ? { 'aria-expanded': String(open) } : {}),
+			},
 		});
+		head.createSpan({ cls: 'plumbline-finding-text', text });
 		if (count > 1) {
 			head.createSpan({
 				cls: 'plumbline-finding-count',
@@ -243,7 +269,7 @@ export class FindingsView extends ItemView {
 		}
 		head.createSpan({
 			cls: 'plumbline-finding-line',
-			text: `L${targetView.editor.offsetToPos(first.start).line + 1}`,
+			text: `L${line}`,
 		});
 		row.createDiv({
 			cls: 'plumbline-finding-msg',
@@ -253,8 +279,7 @@ export class FindingsView extends ItemView {
 		// A row standing for several hits expands to them rather than only ever
 		// jumping to the first, which is what "x12" would otherwise hide.
 		if (count > 1) {
-			row.setAttribute('data-plumbline-focus', `row:${key}`);
-			row.addEventListener('click', () => {
+			head.addEventListener('click', () => {
 				if (open) {
 					this.expanded.delete(key);
 				} else {
@@ -263,18 +288,17 @@ export class FindingsView extends ItemView {
 				this.rerender(`row:${key}`);
 			});
 			if (open) {
+				// A SIBLING of the head, never inside it: a button cannot contain
+				// buttons, and these have to be their own controls.
 				const occ = row.createDiv({ cls: 'plumbline-occurrences' });
 				for (const [i, o] of panelRow.occurrences.entries()) {
-					const text = docText.slice(o.start, o.end);
-					// Buttons, not clickable divs. Stepping through the places a
-					// rule fired is the reason a grouped row expands at all, and
-					// a keyboard user has to be able to do it.
+					const occText = docText.slice(o.start, o.end);
 					const item = occ.createEl('button', {
 						cls: 'plumbline-occurrence',
-						text: `${i + 1}. ${text}`,
+						text: `${i + 1}. ${occText}`,
 						attr: {
 							type: 'button',
-							'aria-label': `Occurrence ${i + 1} of ${panelRow.occurrences.length}: ${text}`,
+							'aria-label': `Occurrence ${i + 1} of ${count}: ${occText}`,
 						},
 					});
 					item.addEventListener('click', (e) => {
@@ -284,7 +308,7 @@ export class FindingsView extends ItemView {
 				}
 			}
 		} else {
-			row.addEventListener('click', () => {
+			head.addEventListener('click', () => {
 				this.jumpTo(first);
 			});
 		}
