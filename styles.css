@@ -88,22 +88,30 @@
    The gutter can never point at a phrase, only at a paragraph. That ceiling is
    CodeMirror's, not a choice; the underline and the panel carry phrase-level
    location. */
-/* Selector weight is deliberate and measured, not decorative. CodeMirror injects
+/* Everything below is scoped to `.plumbline-editor` or `.plumbline-tooltip`,
+   classes this plugin puts on the editor root and on its own tooltip container.
+   Obsidian loads every plugin's CSS globally and `.cm-gutter-lint`,
+   `.cm-lint-marker` and `.cm-tooltip-hover` are CodeMirror's own class names, so
+   unscoped rules here would restyle any other extension's lint gutter and every
+   hover tooltip in the app. The scoping is what keeps these overrides to this
+   plugin's own surfaces.
+
+   Selector weight is deliberate and measured, not decorative. CodeMirror injects
    its gutter theme under a generated class, as `.<gen> .cm-gutter-lint` (0,2,0)
    and `.<gen> .cm-gutter-lint .cm-gutterElement` (0,3,0). A bare
    `.cm-gutter-lint` loses to both, which was verified in the running app: the
    gutter computed to 1.4em and the element padding to 0.2em with those rules in
    place. Adding `.cm-editor` and the element's own `.cm-gutter` class clears them
    without `!important`, which the submission check forbids. */
-.cm-editor .cm-gutter.cm-gutter-lint {
+.cm-editor.plumbline-editor .cm-gutter.cm-gutter-lint {
 	width: 6px;
 }
 
-.cm-editor .cm-gutter.cm-gutter-lint .cm-gutterElement {
+.cm-editor.plumbline-editor .cm-gutter.cm-gutter-lint .cm-gutterElement {
 	padding: 0;
 }
 
-.cm-editor .cm-gutter.cm-gutter-lint .cm-lint-marker {
+.cm-editor.plumbline-editor .cm-gutter.cm-gutter-lint .cm-lint-marker {
 	content: none;
 	width: 3px;
 	height: 100%;
@@ -112,15 +120,15 @@
 	background-color: var(--text-accent);
 }
 
-.cm-editor .cm-gutter.cm-gutter-lint .cm-lint-marker-error {
+.cm-editor.plumbline-editor .cm-gutter.cm-gutter-lint .cm-lint-marker-error {
 	background-color: var(--text-error);
 }
 
-.cm-editor .cm-gutter.cm-gutter-lint .cm-lint-marker-warning {
+.cm-editor.plumbline-editor .cm-gutter.cm-gutter-lint .cm-lint-marker-warning {
 	background-color: var(--text-warning);
 }
 
-.cm-editor .cm-gutter.cm-gutter-lint .cm-lint-marker-info {
+.cm-editor.plumbline-editor .cm-gutter.cm-gutter-lint .cm-lint-marker-info {
 	background-color: var(--text-accent);
 }
 
@@ -150,7 +158,7 @@
 /* The hover popup shown over an underlined finding. CodeMirror's hover-tooltip
    container is an unstyled light box, unreadable on a dark theme, so it is themed
    with the theme's surface and text colors. */
-.cm-tooltip.cm-tooltip-hover {
+.cm-tooltip.cm-tooltip-hover.plumbline-tooltip {
 	background-color: var(--background-secondary);
 	color: var(--text-normal);
 	border: 1px solid var(--background-modifier-border);
@@ -172,11 +180,11 @@
    Hiding the empty section does not fix it: `:first-child` is a DOM position, not
    a rendered one. So the border is cleared on the popup itself, at four classes to
    clear the base theme's three without `!important`. */
-.cm-tooltip-hover .cm-tooltip-lint:empty {
+.cm-tooltip-hover.plumbline-tooltip .cm-tooltip-lint:empty {
 	display: none;
 }
 
-.cm-tooltip.cm-tooltip-hover .plumbline-hover.cm-tooltip-section {
+.cm-tooltip-hover.plumbline-tooltip .plumbline-hover.cm-tooltip-section {
 	border-top: none;
 }
 

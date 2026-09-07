@@ -207,7 +207,21 @@ function findingsHover(): Extension {
 					for (const d of covering) {
 						dom.appendChild(renderFinding(d));
 					}
-					return { dom };
+					return {
+						dom,
+						// The container is CodeMirror's and is shared with every
+						// other hover tooltip in the app, so styling
+						// `.cm-tooltip-hover` on its own would restyle other
+						// plugins' tooltips too. Tagging it here lets styles.css
+						// theme only the containers holding this plugin's popup.
+						// `mount` runs once the tooltip is in the DOM, which is
+						// the first point the parent exists.
+						mount() {
+							dom.parentElement?.classList.add(
+								'plumbline-tooltip',
+							);
+						},
+					};
 				},
 			};
 		},
@@ -267,12 +281,33 @@ export function plumblineDecorations(
 			tr.effects.some((effect) => effect.is(configChanged)),
 		);
 	return [
+		// Marks editors carrying this extension, so the CodeMirror gutter
+		// overrides in styles.css apply here and not to any other extension's
+		// lint gutter.
+		EditorView.editorAttributes.of({ class: 'plumbline-editor' }),
 		linter(source, {
 			delay: LINT_DELAY,
 			needsRefresh,
 			tooltipFilter: () => [],
 		}),
-		lintGutter({ tooltipFilter: (ds) => [gutterTooltip(ds)] }),
+		// Both filters restrict the gutter to THIS plugin's findings. Another
+		// extension registering its own linter puts diagnostics into the same
+		// lint state, and without these the bar's severity would be computed
+		// over a foreign plugin's errors while the summary counted them as
+		// suggestions.
+		//
+		// This `markerFilter` is `lintGutterConfig`'s, which is a different facet
+		// from `linter()`'s and is applied in the lintGutterMarkers StateField
+		// straight off setDiagnosticsEffect. It does NOT feed LintState, so
+		// unlike the one on `linter()` it cannot blind forEachDiagnostic. Do not
+		// conflate the two.
+		lintGutter({
+			markerFilter: (ds) => ds.filter(isPlumblineDiagnostic),
+			tooltipFilter: (ds) => {
+				const mine = ds.filter(isPlumblineDiagnostic);
+				return mine.length === 0 ? [] : [gutterTooltip(mine)];
+			},
+		}),
 		segmentUnderlines(),
 		findingsHover(),
 	];
