@@ -211,7 +211,17 @@ function findingsHover(): Extension {
 				},
 			};
 		},
-		{ hoverTime: HOVER_TIME, hideOnChange: false },
+		// Closed when the user edits or moves the selection, because the popup's
+		// content is a snapshot: CodeMirror maps the tooltip's range through a
+		// change but never re-runs the hover source, so a popup left open across
+		// an edit can go on describing a finding the prose no longer has.
+		//
+		// This is NOT the flash that made the lint hover unusable. That came from
+		// CodeMirror's own `hideOn`, which fires on `setDiagnosticsEffect`, so
+		// every debounced pass dismissed the popup without the user doing
+		// anything. `hideOnChange` fires on `tr.docChanged || tr.selection`, and
+		// the linter's diagnostic transaction has neither.
+		{ hoverTime: HOVER_TIME, hideOnChange: true },
 	);
 }
 
