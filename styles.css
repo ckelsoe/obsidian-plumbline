@@ -63,14 +63,6 @@
 	font-size: var(--font-ui-smaller);
 }
 
-/* The linter's own range mark is kept only so the hover tooltip has a target;
-   the visible underline is drawn by the segment layer below. Hide CodeMirror's
-   default wavy mark for this plugin's ranges. */
-.cm-lintRange.plumbline-flag {
-	background-image: none;
-	padding-bottom: 0;
-}
-
 /* Segment underlines: one line per coverage segment, colored by the worst
    severity covering it. A segment covered by two or more findings uses a double
    line so a denser spot is visibly different from a single-issue one; the line
@@ -94,46 +86,33 @@
 	border-bottom-width: 4px;
 }
 
-/* The lint hover tooltip. CodeMirror's hover-tooltip container renders as a light
-   box (about #f5f5f5) with no theme colors, so on a dark theme the message is
-   unreadable. The lint message (`.cm-tooltip-lint`) is a transparent child of that
-   container, so the container is what must be themed. It carries CodeMirror hover
-   tooltips, which in this plugin's context are the lint messages. min-width stops
-   it collapsing into a narrow, tall column. */
+/* The hover popup shown over an underlined finding. CodeMirror's hover-tooltip
+   container is an unstyled light box, unreadable on a dark theme, so it is themed
+   with the theme's surface and text colors. */
 .cm-tooltip.cm-tooltip-hover {
 	background-color: var(--background-secondary);
 	color: var(--text-normal);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
-	min-width: 240px;
-	max-width: 360px;
 }
 
-/* A divider between findings that stack on the same text, so several issues at one
-   spot read as several, not one run-on block. */
-.cm-tooltip-lint .cm-diagnostic + .cm-diagnostic {
+.plumbline-hover {
+	max-width: 340px;
+}
+
+/* One finding row: a colored severity tag and the rule message. A divider
+   separates several findings that cover the same text, so they read as several. */
+.plumbline-hover-item {
+	padding: var(--size-4-1) var(--size-4-2);
+	color: var(--text-normal);
+	white-space: normal;
+}
+
+.plumbline-hover-item + .plumbline-hover-item {
 	border-top: 1px solid var(--background-modifier-border);
 }
 
-.cm-tooltip-lint .cm-diagnostic-error {
-	border-left-color: var(--text-error);
-}
-
-.cm-tooltip-lint .cm-diagnostic-warning {
-	border-left-color: var(--text-warning);
-}
-
-.cm-tooltip-lint .cm-diagnostic-info {
-	border-left-color: var(--text-accent);
-}
-
-/* A rendered finding: a colored severity tag and the rule message. */
-.plumbline-lint-item {
-	white-space: normal;
-	color: var(--text-normal);
-}
-
-.plumbline-lint-tag {
+.plumbline-hover-tag {
 	margin-right: var(--size-4-1);
 	font-size: var(--font-ui-smaller);
 	font-weight: var(--font-semibold);
@@ -141,14 +120,14 @@
 	letter-spacing: 0.03em;
 }
 
-.plumbline-lint-tag-error {
+.plumbline-hover-tag-error {
 	color: var(--text-error);
 }
 
-.plumbline-lint-tag-warning {
+.plumbline-hover-tag-warning {
 	color: var(--text-warning);
 }
 
-.plumbline-lint-tag-suggestion {
+.plumbline-hover-tag-suggestion {
 	color: var(--text-accent);
 }
