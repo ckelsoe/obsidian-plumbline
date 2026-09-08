@@ -6,6 +6,7 @@ import type { EditorView } from '@codemirror/view';
 import { plumblineDecorations, relintEditor } from './editor-decorations';
 import { PlumblineApiImpl } from './api';
 import { overlapsAnchor } from './annoteca-guard';
+import { PromoteRequest, promoteRequestFor } from './promote-request';
 import {
 	REPORT_DIR,
 	REPORT_INDEX_PATH,
@@ -16,7 +17,7 @@ import {
 	upsertEntry,
 } from './report-index';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
-import { LintResult, ResolvedConfig } from './engine/types';
+import { Diagnostic, LintResult, ResolvedConfig } from './engine/types';
 import { fileScope } from './engine/file-scope';
 import { buildReport } from './report';
 import { scriptureReferences, scriptureQuotes } from './engine/scripture';
@@ -104,6 +105,10 @@ export default class PlumblinePlugin extends Plugin {
 				},
 				canReplace: (view, from, to) =>
 					this.canReplaceRange(view, from, to),
+				canAnnotate: () => this.annotecaPromoteApi() !== null,
+				annotate: (view, diagnostic) => {
+					void this.annotateFinding(view, diagnostic);
+				},
 			}),
 		);
 
@@ -650,6 +655,93 @@ export default class PlumblinePlugin extends Plugin {
 		} catch (err) {
 			console.error(err);
 			new Notice('Plumbline: could not write the report.');
+		}
+	}
+
+	// Annoteca's promote surface, or null when it is absent or too old.
+	//
+	// Resolved at call time per contract 4.5, never held across the other
+	// plugin's reload. `promote` arrived with apiVersion 2, so 1 is a real
+	// Annoteca that cannot take a promotion and degrades to no button.
+	private annotecaPromoteApi(): {
+		promote: (
+			path: string,
+			requests: readonly PromoteRequest[],
+			expected: string,
+		) => Promise<readonly unknown[]>;
+	} | null {
+		try {
+			const plugin: unknown = this.app.plugins.getPlugin('annoteca');
+			if (plugin === null || typeof plugin !== 'object') {
+				return null;
+			}
+			const api: unknown = (plugin as { api?: unknown }).api;
+			if (api === null || typeof api !== 'object') {
+				return null;
+			}
+			const { apiVersion, promote } = api as {
+				apiVersion?: unknown;
+				promote?: unknown;
+			};
+			if (typeof apiVersion !== 'number' || apiVersion < 2) {
+				return null;
+			}
+			if (typeof promote !== 'function') {
+				return null;
+			}
+			return api as {
+				promote: (
+					path: string,
+					requests: readonly PromoteRequest[],
+					expected: string,
+				) => Promise<readonly unknown[]>;
+			};
+		} catch (err) {
+			console.error(err);
+			return null;
+		}
+	}
+
+	// Turn one finding into an Annoteca comment.
+	//
+	// The one-way bridge in contract 2: a finding is computed and disappears when
+	// the prose changes, a comment is written into the note and is the record. It
+	// is promoted only on this explicit click, one at a time, so the promotion
+	// budget is never the thing standing between the user and a surprise.
+	private async annotateFinding(
+		view: EditorView,
+		diagnostic: Diagnostic,
+	): Promise<void> {
+		try {
+			const api = this.annotecaPromoteApi();
+			// Resolved from the view that raised the hover, not from whatever is
+			// active by the time the click lands.
+			const file = this.markdownViewFor(view)?.file;
+			if (api === null || !file) {
+				new Notice('Plumbline: Annoteca is not available here.');
+				return;
+			}
+			// The text the anchor offsets were computed against. Annoteca refuses
+			// a stale snapshot rather than writing a marker onto moved prose, so
+			// this has to be the LIVE editor text, not the copy on disk.
+			const text = view.state.doc.toString();
+			const request = promoteRequestFor(
+				diagnostic,
+				text.slice(diagnostic.start, diagnostic.end),
+			);
+			if (request === null) {
+				new Notice('Plumbline: that finding has no stable ID yet.');
+				return;
+			}
+			const created = await api.promote(file.path, [request], text);
+			new Notice(
+				created.length > 0
+					? 'Plumbline: added an Annoteca comment.'
+					: 'Plumbline: that finding is already annotated.',
+			);
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not add the comment.');
 		}
 	}
 

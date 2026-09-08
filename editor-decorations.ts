@@ -285,6 +285,20 @@ function renderFinding(
 			});
 		});
 	}
+	if (actions.canAnnotate()) {
+		const annotate = row.createEl('button', {
+			cls: 'plumbline-hover-action',
+			text: 'Annotate',
+			attr: {
+				type: 'button',
+				'aria-label': `Turn this ${diagnostic.ruleSlug} finding into an Annoteca comment`,
+				title: 'Create a comment here, so this can be discussed and answered.',
+			},
+		});
+		annotate.addEventListener('click', () => {
+			actions.annotate(view, diagnostic);
+		});
+	}
 	const off = row.createEl('button', {
 		cls: 'plumbline-hover-action',
 		text: 'Turn off here',
@@ -627,6 +641,14 @@ export interface DecorationActions {
 	// original its reject-as-revert depends on. False means the fix is offered
 	// but refused, with the reason on the button.
 	canReplace(view: EditorView, from: number, to: number): boolean;
+	// Whether Annoteca is present and new enough to accept a promoted comment.
+	// Checked at render time so the button is simply absent when it cannot work,
+	// rather than offered and then failing (contract: degrade to unpaired
+	// behaviour on an absent or unknown apiVersion).
+	canAnnotate(): boolean;
+	// Turn this finding into an Annoteca comment, so it can be discussed and
+	// answered rather than only seen. The one-way bridge in contract 2.
+	annotate(view: EditorView, diagnostic: Diagnostic): void;
 }
 
 // The editor integration. One debounced engine pass into one private state field,
