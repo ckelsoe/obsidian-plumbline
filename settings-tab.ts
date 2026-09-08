@@ -59,6 +59,25 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
+				heading: 'Inline marks',
+				items: [
+					{
+						name: 'Underline flagged phrases',
+						desc: 'Yield to comments hides the underline where an open Annoteca comment already marks the same words, so two plugins do not mark one passage at once. A comment you have resolved, or one with an edit waiting on you, does not hide it. The gutter bar and the findings panel always show everything.',
+						control: {
+							type: 'dropdown',
+							key: 'inlineUnderlines',
+							options: {
+								always: 'Always',
+								auto: 'Yield to comments',
+								never: 'Never',
+							},
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
 				heading: 'Comments',
 				items: this.plugin.commentSpanStates().map((state) => ({
 					name: state.name,
@@ -130,6 +149,13 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			// the rules list below.
 			this.plugin.applyConfigChange();
 			this.update();
+		}
+		if (key === 'inlineUnderlines') {
+			// Nothing in the document changed, so no pass is scheduled and the
+			// decoration layer has no reason to recompute. Without this the
+			// underlines keep whatever they were until the next keystroke, and
+			// a setting that visibly does nothing reads as broken.
+			this.plugin.applyConfigChange();
 		}
 	}
 

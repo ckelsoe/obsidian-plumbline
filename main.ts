@@ -6,6 +6,12 @@ import type { EditorView } from '@codemirror/view';
 import { plumblineDecorations, relintEditor } from './editor-decorations';
 import { PlumblineApiImpl } from './api';
 import { overlapsAnchor } from './annoteca-guard';
+import {
+	DEFAULT_INLINE_UNDERLINES,
+	isInlineUnderlines,
+	type CommentAnchor,
+	type InlineUnderlines,
+} from './yield-to-comments';
 import { AnnotateModal } from './annotate-modal';
 import { PromoteRequest, promoteRequestFor } from './promote-request';
 import {
@@ -56,10 +62,14 @@ export interface PlumblineSettings {
 	// The active profile selects which rule packs are on and how they are tuned.
 	// Profiles and the pack cascade are specified in the project's dev docs.
 	activeProfile: string;
+	// Whether flagged phrases are underlined in the editor, and whether the
+	// underline yields to Annoteca's open comments. Interop-contract 5.1.
+	inlineUnderlines: InlineUnderlines;
 }
 
 export const DEFAULT_SETTINGS: PlumblineSettings = {
 	activeProfile: 'scripture-book',
+	inlineUnderlines: DEFAULT_INLINE_UNDERLINES,
 };
 
 // Debounce for live re-analysis while typing, in milliseconds.
@@ -100,17 +110,24 @@ export default class PlumblinePlugin extends Plugin {
 
 		// Underline flagged phrases in the editor, live.
 		this.registerEditorExtension(
-			plumblineDecorations((text) => this.resolvedConfig(text), {
-				disableRule: (slug, view) => {
-					void this.disableRuleForView(slug, view);
+			plumblineDecorations(
+				(text) => this.resolvedConfig(text),
+				{
+					disableRule: (slug, view) => {
+						void this.disableRuleForView(slug, view);
+					},
+					canReplace: (view, from, to) =>
+						this.canReplaceRange(view, from, to),
+					canAnnotate: () => this.annotecaPromoteApi() !== null,
+					annotate: (view, diagnostic) => {
+						void this.annotateFinding(view, diagnostic);
+					},
 				},
-				canReplace: (view, from, to) =>
-					this.canReplaceRange(view, from, to),
-				canAnnotate: () => this.annotecaPromoteApi() !== null,
-				annotate: (view, diagnostic) => {
-					void this.annotateFinding(view, diagnostic);
+				{
+					inlineUnderlines: () => this.settings.inlineUnderlines,
+					commentAnchors: (text) => this.commentAnchorsFor(text),
 				},
-			}),
+			),
 		);
 
 		this.registerView(
@@ -213,6 +230,9 @@ export default class PlumblinePlugin extends Plugin {
 				typeof record.activeProfile === 'string'
 					? record.activeProfile
 					: DEFAULT_SETTINGS.activeProfile,
+			inlineUnderlines: isInlineUnderlines(record.inlineUnderlines)
+				? record.inlineUnderlines
+				: DEFAULT_SETTINGS.inlineUnderlines,
 		};
 	}
 
@@ -803,6 +823,19 @@ export default class PlumblinePlugin extends Plugin {
 		return null;
 	}
 
+	// Annoteca's anchors for this text, narrowed to what the yield reads.
+	//
+	// An empty list covers both "Annoteca is absent" and "this note has no
+	// comments", which are the same answer to the only question the yield asks.
+	commentAnchorsFor(text: string): readonly CommentAnchor[] {
+		return (this.annotecaAnchorsFromText(text) ?? []).map((a) => ({
+			start: a.start,
+			end: a.end,
+			resolved: a.resolved,
+			addressed: a.addressed,
+		}));
+	}
+
 	// Whether Plumbline may replace a range of prose.
 	//
 	// Interop-contract 4.1 makes Annoteca the only writer of note prose, because
@@ -816,7 +849,7 @@ export default class PlumblinePlugin extends Plugin {
 		from: number,
 		to: number,
 	): boolean {
-		const anchors = this.annotecaAnchors(view);
+		const anchors = this.annotecaAnchorsFromText(view.state.doc.toString());
 		if (anchors === null) {
 			return true;
 		}
@@ -827,9 +860,9 @@ export default class PlumblinePlugin extends Plugin {
 	// absent or too new to understand. Resolved at call time per contract 4.5,
 	// and computed from the LIVE editor text, because the on-disk copy is stale
 	// while there are unsaved edits.
-	private annotecaAnchors(
-		view: EditorView,
-	): readonly { start: number; end: number }[] | null {
+	private annotecaAnchorsFromText(
+		text: string,
+	): readonly CommentAnchor[] | null {
 		try {
 			const plugin: unknown = this.app.plugins.getPlugin('annoteca');
 			if (plugin === null || typeof plugin !== 'object') {
@@ -852,17 +885,33 @@ export default class PlumblinePlugin extends Plugin {
 			}
 			const anchors: unknown = (
 				anchorsFor as (content: string) => unknown
-			).call(api, view.state.doc.toString());
+			).call(api, text);
 			if (!Array.isArray(anchors)) {
 				return null;
 			}
-			return anchors.filter(
-				(a): a is { start: number; end: number } =>
-					typeof a === 'object' &&
-					a !== null &&
-					typeof (a as { start?: unknown }).start === 'number' &&
-					typeof (a as { end?: unknown }).end === 'number',
-			);
+			return anchors
+				.filter(
+					(a): a is Record<string, unknown> =>
+						typeof a === 'object' &&
+						a !== null &&
+						typeof (a as { start?: unknown }).start === 'number' &&
+						typeof (a as { end?: unknown }).end === 'number',
+				)
+				.map((a) => ({
+					start: a.start as number,
+					end: a.end as number,
+					// Absent reads as unresolved, which is the conservative
+					// direction: it treats an anchor this build cannot classify
+					// as one worth yielding to.
+					resolved: a.resolved === true,
+					// `addressed` arrived after Annoteca's apiVersion 2 as an
+					// additive field, so an older build simply does not send it.
+					// Feature-detected rather than version-gated.
+					addressed:
+						typeof a.addressed === 'boolean'
+							? a.addressed
+							: undefined,
+				}));
 		} catch (err) {
 			// A consumer of another plugin's API never lets that plugin's failure
 			// become this one's. Refusing the fix is the safe answer, but a
