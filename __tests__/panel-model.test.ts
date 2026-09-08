@@ -19,11 +19,12 @@ const finding = (
 	starts: number[],
 	confidence = CONFIDENCE.mechanical,
 ): Finding => ({
+	key: `f-${slug}`,
 	ruleSlug: slug,
 	packId: 'base',
 	severity,
 	message: `${slug} message`,
-	occurrences: starts.map((s) => ({ start: s, end: s + 5 })),
+	occurrences: starts.map((s) => ({ start: s, end: s + 5, key: `k${s}` })),
 	confidence,
 	// The real WHOLE-NOTE priority, not a placeholder. Zero here made the
 	// per-paragraph ranking test vacuous: every priority tied, the sort fell
@@ -280,12 +281,13 @@ describe('sectionSummary is not affected by the cap or the floor', () => {
 describe('buildPanelModel: an occurrence lands in one paragraph only', () => {
 	it('does not duplicate a finding that spans a paragraph break', () => {
 		const spanning: Finding = {
+			key: 'f-wide',
 			ruleSlug: 'wide',
 			packId: 'base',
 			severity: 'warning',
 			message: 'spans the break',
 			// Starts in paragraph one, ends inside paragraph two.
-			occurrences: [{ start: 5, end: P2_START + 10 }],
+			occurrences: [{ start: 5, end: P2_START + 10, key: 'kspan' }],
 			confidence: CONFIDENCE.heuristic,
 			priority: 0,
 			rolledUp: false,

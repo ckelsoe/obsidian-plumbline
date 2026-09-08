@@ -25,12 +25,17 @@ export interface ReportFinding {
 //   1  file, profile, metrics, scripture, findings[] (one entry per hit)
 //   2  findings[] become one entry per RULE, carrying every occurrence, a
 //      confidence and a priority, ranked. `hits` holds the old per-hit list.
-export const REPORT_SCHEMA_VERSION = 2;
+//   3  every finding and every occurrence carries a stable `key`
+//      (interop-contract 7.2), so a consumer can tell the finding it already
+//      acted on from a new one without comparing offsets that move on any edit.
+export const REPORT_SCHEMA_VERSION = 3;
 
 // One rule's findings for this note: every place it fired, plus what the ranking
 // thought of it. This is the rolled-up shape the panel and the hub lane read, so
 // a collaborator on the filesystem sees the same counts the writer sees.
 export interface ReportRuleFinding {
+	// Contract 7.2. This finding's identity, which is its first occurrence's.
+	key: string;
 	ruleSlug: string;
 	packId: string;
 	severity: Severity;
@@ -39,6 +44,9 @@ export interface ReportRuleFinding {
 	priority: number;
 	rolledUp: boolean;
 	occurrences: {
+		// Contract 7.2. What a promoted comment carries as its source key, so a
+		// re-lint can tell which occurrences already have a thread.
+		key: string;
 		line: number;
 		start: number;
 		end: number;
@@ -85,6 +93,7 @@ export function buildReport(
 		metrics: result.metrics,
 		scripture: summarizeScripture(scriptureReferences(text)),
 		findings: result.findings.map((f) => ({
+			key: f.key,
 			ruleSlug: f.ruleSlug,
 			packId: f.packId,
 			severity: f.severity,
@@ -93,6 +102,7 @@ export function buildReport(
 			priority: f.priority,
 			rolledUp: f.rolledUp,
 			occurrences: f.occurrences.map((o) => ({
+				key: o.key,
 				line: lineOf(text, o.start),
 				start: o.start,
 				end: o.end,

@@ -13,11 +13,12 @@ const result: LintResult = {
 	// which is what buildReport has to carry through to both of its lists.
 	findings: [
 		{
+			key: 'f-rd',
 			ruleSlug: 'reader-direction',
 			packId: 'base',
 			severity: 'warning',
 			message: 'Cut it.',
-			occurrences: [{ start: 12, end: 27 }],
+			occurrences: [{ start: 12, end: 27, key: 'krd' }],
 			confidence: 0.9,
 			priority: 9,
 			rolledUp: false,
@@ -50,7 +51,7 @@ describe('buildReport', () => {
 		// Tied to the constant, so a shape change that forgets to bump it
 		// fails here rather than shipping an unversioned change.
 		expect(report.schemaVersion).toBe(REPORT_SCHEMA_VERSION);
-		expect(REPORT_SCHEMA_VERSION).toBe(2);
+		expect(REPORT_SCHEMA_VERSION).toBe(3);
 
 		// Ranked, one row per rule, every occurrence under it.
 		expect(report.findings).toHaveLength(1);
@@ -62,6 +63,11 @@ describe('buildReport', () => {
 			expect(finding.occurrences).toHaveLength(1);
 			expect(finding.occurrences[0]?.line).toBe(2);
 			expect(finding.occurrences[0]?.text).toBe('Read that again');
+			// Schema 3: identity travels with the report, so a headless
+			// consumer can tell a finding it already acted on from a new one
+			// without comparing offsets that any edit above moves.
+			expect(finding.key).toBe('f-rd');
+			expect(finding.occurrences[0]?.key).toBe('krd');
 		}
 
 		// The per-hit list is still there, because the rolled-up view cannot be

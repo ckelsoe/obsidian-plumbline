@@ -1,5 +1,5 @@
 import { ItemView, MarkdownView, WorkspaceLeaf } from 'obsidian';
-import { LintResult, Occurrence } from './engine/types';
+import { LintResult } from './engine/types';
 import {
 	DEFAULT_ROW_CAP,
 	buildPanelModel,
@@ -328,7 +328,9 @@ export class FindingsView extends ItemView {
 		}
 	}
 
-	private jumpTo(occurrence: Occurrence): void {
+	// Positions only. A synthetic range (the section header jumps to the top of
+	// a paragraph) has no occurrence key and does not need one.
+	private jumpTo(occurrence: { start: number; end: number }): void {
 		const targetView = this.targetView;
 		if (!targetView) {
 			return;

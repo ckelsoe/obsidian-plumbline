@@ -3,6 +3,16 @@ import { PlumblineSettingTab } from './settings-tab';
 import { AnalysisService } from './analysis-service';
 import { rhythmStatusText, rhythmDetail } from './rhythm-format';
 import { plumblineDecorations, relintEditor } from './editor-decorations';
+import { PlumblineApiImpl } from './api';
+import {
+	REPORT_DIR,
+	REPORT_INDEX_PATH,
+	ReportIndexEntry,
+	emptyIndex,
+	parseIndex,
+	reportPathFor,
+	upsertEntry,
+} from './report-index';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
 import { LintResult, ResolvedConfig } from './engine/types';
 import { fileScope } from './engine/file-scope';
@@ -63,10 +73,20 @@ export default class PlumblinePlugin extends Plugin {
 	// once and keeps showing while a non-editor pane (like the panel) is focused.
 	private lastResult: LintResult | null = null;
 	private lastView: MarkdownView | null = null;
+	// The read-only surface other plugins call, contract section 6. Public and
+	// named `api` because that is the property the contract tells a consumer to
+	// reach for on the plugin instance.
+	readonly api = new PlumblineApiImpl(this);
 	private vaultConfig: VaultConfig = EMPTY_VAULT_CONFIG;
 	// Serializes config writes so two quick toggles cannot interleave their
 	// read-modify-write of the file and drop one.
 	private saveQueue: Promise<void> = Promise.resolve();
+	// Serializes report-index writes for the same reason. The index is a
+	// read-modify-write over one file, so two report commands overlapping would
+	// both read the same index and the second write would drop the first note's
+	// entry. Reachable by running the report, switching notes, and running it
+	// again before the first write lands.
+	private indexQueue: Promise<void> = Promise.resolve();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -351,7 +371,13 @@ export default class PlumblinePlugin extends Plugin {
 	// rule toggle, config reload): status bar, findings panel, and the editor's
 	// live underlines.
 	applyConfigChange(): void {
+		// refresh() notifies for the active note. Everything else open gets told
+		// below, deduplicated by PATH: one note can be open in several leaves,
+		// and a consumer does not want the same change three times because the
+		// user has a split view.
+		const active = this.analysis.activeMarkdownView()?.file?.path;
 		this.refresh();
+		const notified = new Set<string>(active === undefined ? [] : [active]);
 		// Re-lint every open Markdown editor, not just the active one, since the
 		// change affects all of them. In reading view the CodeMirror editor may not
 		// be mounted, so guard the handle.
@@ -361,6 +387,16 @@ export default class PlumblinePlugin extends Plugin {
 				const cm = view.editor.cm;
 				if (cm) {
 					relintEditor(cm);
+				}
+				// Notified for EVERY open note, not just the active one that
+				// refresh() covered. A profile switch or a rule toggle changes
+				// the findings for all of them at once, and a consumer showing a
+				// background note would otherwise keep a stale lane until that
+				// note happened to be typed in.
+				const path = view.file?.path;
+				if (path !== undefined && !notified.has(path)) {
+					notified.add(path);
+					this.api.emitFindingsChanged(path);
 				}
 			}
 		}
@@ -407,6 +443,13 @@ export default class PlumblinePlugin extends Plugin {
 		const result = this.analysis.analyze(view);
 		this.lastResult = result;
 		this.lastView = view;
+		// Every recomputation of this note's findings, whatever caused it: a
+		// keystroke, a leaf change, a config reload. A consumer holding a lane
+		// for this path needs to hear about all of them.
+		const path = view.file?.path;
+		if (path !== undefined) {
+			this.api.emitFindingsChanged(path);
+		}
 		if (this.statusBar) {
 			this.statusBar.setText(rhythmStatusText(result));
 		}
@@ -580,13 +623,19 @@ export default class PlumblinePlugin extends Plugin {
 				text,
 				this.analysis.analyze(view),
 			);
-			const dir = '.plumbline';
 			const adapter = this.app.vault.adapter;
-			if (!(await adapter.exists(dir))) {
-				await adapter.mkdir(dir);
+			if (!(await adapter.exists(REPORT_DIR))) {
+				await adapter.mkdir(REPORT_DIR);
 			}
-			const reportPath = `${dir}/${file.path.split('/').join('-')}.json`;
+			const reportPath = reportPathFor(file.path);
 			await adapter.write(reportPath, JSON.stringify(report, null, 2));
+			await this.updateReportIndex({
+				file: file.path,
+				report: reportPath,
+				profile: report.profile,
+				findings: report.findings.length,
+				updated: new Date().toISOString(),
+			});
 			new Notice(
 				`Plumbline: wrote ${report.findings.length} flags to ${reportPath}`,
 			);
@@ -594,5 +643,46 @@ export default class PlumblinePlugin extends Plugin {
 			console.error(err);
 			new Notice('Plumbline: could not write the report.');
 		}
+	}
+
+	// Record this note's report in the vault-level index, so a headless
+	// collaborator finds every report by reading one file instead of walking the
+	// vault and guessing which JSON belongs to which note.
+	//
+	// Read-modify-write, so a missing or hand-mangled index costs the stale
+	// entries rather than this write: parseIndex treats anything unreadable as
+	// empty. The index is a derived convenience and every report file is still
+	// self-describing, so rebuilding it costs one re-run per note.
+	private async updateReportIndex(entry: ReportIndexEntry): Promise<void> {
+		// Chained rather than awaited directly, so overlapping report commands
+		// queue behind each other instead of racing the read.
+		this.indexQueue = this.indexQueue.then(
+			() => this.writeReportIndex(entry),
+			() => this.writeReportIndex(entry),
+		);
+		await this.indexQueue;
+	}
+
+	private async writeReportIndex(entry: ReportIndexEntry): Promise<void> {
+		const adapter = this.app.vault.adapter;
+		let index = emptyIndex();
+		if (await adapter.exists(REPORT_INDEX_PATH)) {
+			try {
+				index = parseIndex(
+					JSON.parse(
+						await adapter.read(REPORT_INDEX_PATH),
+					) as unknown,
+				);
+			} catch (err) {
+				// Unparseable JSON, not merely an unexpected shape. Logged and
+				// replaced rather than thrown, because losing the index must not
+				// lose the report that was just written.
+				console.error(err);
+			}
+		}
+		await adapter.write(
+			REPORT_INDEX_PATH,
+			JSON.stringify(upsertEntry(index, entry), null, 2),
+		);
 	}
 }

@@ -5,6 +5,7 @@ import {
 	ResolvedConfig,
 	Severity,
 } from './types';
+import { withKeys } from './finding-key';
 
 // Volume control, level one and level three of interop-contract section 3.
 //
@@ -83,6 +84,7 @@ export function priorityOf(
 // rank. `confidenceOf` is passed in rather than read from the diagnostics because
 // confidence lives on the rule record, not on the hit.
 export function rollup(
+	text: string,
 	diagnostics: readonly Diagnostic[],
 	config: Pick<ResolvedConfig, 'rollupThreshold' | 'confidenceBySlug'>,
 	confidenceOf: (slug: string) => number,
@@ -107,12 +109,17 @@ export function rollup(
 		if (first === undefined) {
 			continue;
 		}
+		// Keyless here; withKeys() fills them in below, once every finding for the
+		// note exists. The occurrence index it hashes is note-scoped, so it cannot
+		// be assigned one finding at a time.
 		const occurrences: Occurrence[] = hits.map((h) => ({
 			start: h.start,
 			end: h.end,
+			key: '',
 		}));
 		const confidence = confidenceOf(slug);
 		findings.push({
+			key: '',
 			ruleSlug: slug,
 			packId: first.packId,
 			severity: first.severity,
@@ -132,5 +139,5 @@ export function rollup(
 			(a.occurrences[0]?.start ?? 0) - (b.occurrences[0]?.start ?? 0) ||
 			a.ruleSlug.localeCompare(b.ruleSlug),
 	);
-	return findings;
+	return withKeys(text, findings);
 }
