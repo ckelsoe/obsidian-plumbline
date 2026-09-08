@@ -24,6 +24,11 @@ import { Diagnostic, ResolvedConfig, Severity } from './engine/types';
 import { coverageSegments, segmentAt } from './underline-coverage';
 import { rulerMarkTitle, rulerMarks } from './ruler-marks';
 import {
+	visibleUnderlines,
+	type CommentAnchor,
+	type InlineUnderlines,
+} from './yield-to-comments';
+import {
 	countLabel,
 	paragraphLineRange,
 	summarizeSeverities,
@@ -188,9 +193,32 @@ function findingsPass(getConfig: (text: string) => ResolvedConfig): Extension {
 // severity covering it, doubled where two or more findings overlap so a denser
 // spot is visibly different from a single-issue one. Segments never overlap, so
 // each is one clean mark and the line height is not a constraint.
-function buildUnderlines(state: EditorState): DecorationSet {
+// What the underline layer needs from the plugin: the writer's setting, and
+// Annoteca's open anchors for the note being edited. Both are read per build
+// rather than captured, because either can change without a document change.
+export interface YieldSource {
+	inlineUnderlines(): InlineUnderlines;
+	// Annoteca's anchors for this text, or an empty list when it is absent. Not
+	// null: "no anchors" and "no Annoteca" are the same answer here, and contract
+	// 5.1 says `auto` behaves as `always` when there is nothing to yield to.
+	commentAnchors(text: string): readonly CommentAnchor[];
+}
+
+function buildUnderlines(
+	state: EditorState,
+	yieldTo: YieldSource,
+): DecorationSet {
 	const ranges: Range<Decoration>[] = [];
-	for (const seg of coverageSegments(findingsIn(state))) {
+	// The yield happens HERE, on the underline layer alone. The gutter, the
+	// ruler and the panel still carry every finding, because contract 5.1 gives
+	// up the inline mark and nothing else: a suppressed finding is still a
+	// finding, and hiding it everywhere would be losing it.
+	const shown = visibleUnderlines(
+		findingsIn(state),
+		yieldTo.commentAnchors(state.doc.toString()),
+		yieldTo.inlineUnderlines(),
+	);
+	for (const seg of coverageSegments(shown)) {
 		const multi = seg.count >= 2 ? ' plumbline-mark-multi' : '';
 		ranges.push(
 			Decoration.mark({
@@ -659,11 +687,14 @@ export interface DecorationActions {
 export function plumblineDecorations(
 	getConfig: (text: string) => ResolvedConfig,
 	actions: DecorationActions,
+	yieldTo: YieldSource,
 ): Extension {
 	return [
 		findingsField,
 		findingsPass(getConfig),
-		EditorView.decorations.compute([findingsField], buildUnderlines),
+		EditorView.decorations.compute([findingsField], (state) =>
+			buildUnderlines(state, yieldTo),
+		),
 		severityGutter(),
 		overviewRuler,
 		findingsHover(actions),
