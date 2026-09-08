@@ -417,6 +417,29 @@
 	background-color: var(--text-accent);
 }
 
+/* The dialog that turns a finding into a comment. The finding is shown as
+   read-only context above the writer's own box, because the reason they are here
+   is the thing they should not have to leave to re-read. */
+.plumbline-annotate-context {
+	display: flex;
+	align-items: baseline;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-1);
+}
+
+.plumbline-annotate-rule {
+	font-family: var(--font-monospace);
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.plumbline-annotate-message {
+	margin-top: 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
 /* The actions on a finding: swap in the plain word, or turn the rule off for
    this note. Small and quiet, because the message is the point and these are
    the follow-up. */

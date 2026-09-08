@@ -6,6 +6,7 @@ import type { EditorView } from '@codemirror/view';
 import { plumblineDecorations, relintEditor } from './editor-decorations';
 import { PlumblineApiImpl } from './api';
 import { overlapsAnchor } from './annoteca-guard';
+import { AnnotateModal } from './annotate-modal';
 import { PromoteRequest, promoteRequestFor } from './promote-request';
 import {
 	REPORT_DIR,
@@ -725,15 +726,32 @@ export default class PlumblinePlugin extends Plugin {
 			// a stale snapshot rather than writing a marker onto moved prose, so
 			// this has to be the LIVE editor text, not the copy on disk.
 			const text = view.state.doc.toString();
-			const request = promoteRequestFor(
-				diagnostic,
-				text.slice(diagnostic.start, diagnostic.end),
+			const phrase = text.slice(diagnostic.start, diagnostic.end);
+			// Asked BEFORE the snapshot is used, because the writer may take a
+			// while to type and the note can move on underneath them. The text
+			// is re-read after the dialog closes and the anchors re-derived from
+			// that, or Annoteca would refuse a stale snapshot.
+			const note = await this.askForComment(
+				phrase,
+				diagnostic.ruleSlug,
+				diagnostic.message,
 			);
+			if (note === null) {
+				return;
+			}
+			const current = view.state.doc.toString();
+			if (current !== text) {
+				new Notice(
+					'Plumbline: the note changed while you were typing. Try again.',
+				);
+				return;
+			}
+			const request = promoteRequestFor(diagnostic, phrase, note);
 			if (request === null) {
 				new Notice('Plumbline: that finding has no stable ID yet.');
 				return;
 			}
-			const created = await api.promote(file.path, [request], text);
+			const created = await api.promote(file.path, [request], current);
 			new Notice(
 				created.length > 0
 					? 'Plumbline: added an Annoteca comment.'
@@ -743,6 +761,28 @@ export default class PlumblinePlugin extends Plugin {
 			console.error(err);
 			new Notice('Plumbline: could not add the comment.');
 		}
+	}
+
+	// The writer's own words for a comment, or null if they backed out.
+	//
+	// A promoted comment carrying only the rule's message is a thread with
+	// nothing in it to answer, which is the opposite of why anyone promotes a
+	// finding. Empty is a real answer and distinct from null: it means record
+	// the finding on its own.
+	private askForComment(
+		phrase: string,
+		ruleSlug: string,
+		message: string,
+	): Promise<string | null> {
+		return new Promise((resolve) => {
+			new AnnotateModal(
+				this.app,
+				phrase,
+				ruleSlug,
+				message,
+				resolve,
+			).open();
+		});
 	}
 
 	// The MarkdownView driving a given CodeMirror editor.

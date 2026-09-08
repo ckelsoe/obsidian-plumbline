@@ -25,16 +25,21 @@ export interface PromoteRequest {
 
 // The comment body.
 //
-// Leads with the rule's own message, because that is what the writer needs to
-// act on, and names the rule after it so a reader of the note, human or
-// assistant, can see which check produced this and switch it off if it is wrong
-// for their voice. The flagged words are quoted: the marker sits next to them,
-// but a comment read in the hub or an export is away from the prose.
+// The writer's own words come FIRST and alone on their line, because that is
+// what a reader, human or assistant, is meant to answer. The finding follows as
+// context, so a thread read in the hub or an export still says what triggered
+// it and which rule to switch off if the rule is the thing that is wrong.
+//
+// With no words from the writer the body is the finding alone, which is the
+// old behaviour and still useful as a bookmark.
 export function promoteBody(
 	diagnostic: Diagnostic,
 	anchorText: string,
+	note: string,
 ): string {
-	return `${diagnostic.message} Flagged "${anchorText}" (${diagnostic.ruleSlug}).`;
+	const finding = `Plumbline flagged "${anchorText}" (${diagnostic.ruleSlug}): ${diagnostic.message}`;
+	const written = note.trim();
+	return written === '' ? finding : `${written}\n\n${finding}`;
 }
 
 // The request for one finding.
@@ -45,6 +50,7 @@ export function promoteBody(
 export function promoteRequestFor(
 	diagnostic: Diagnostic,
 	anchorText: string,
+	note: string,
 ): PromoteRequest | null {
 	const { key } = diagnostic;
 	if (key === undefined || key === '') {
@@ -52,7 +58,7 @@ export function promoteRequestFor(
 	}
 	return {
 		category: PROMOTE_CATEGORY,
-		body: promoteBody(diagnostic, anchorText),
+		body: promoteBody(diagnostic, anchorText, note),
 		anchor: { start: diagnostic.start, end: diagnostic.end },
 		author: PROMOTE_AUTHOR,
 		sourceKey: key,
