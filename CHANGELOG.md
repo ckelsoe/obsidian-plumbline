@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every finding now carries a stable id, and so does each place it fired. The id survives a re-lint and survives edits elsewhere in the note, and it changes when the flagged phrase itself changes, because edited prose is a new finding. That is what lets another tool tell a finding it has already acted on from one it has not, without comparing positions that shift on every keystroke.
 - The `.plumbline/` folder gains an `index.json` listing every report that has been written, with the note it belongs to, its profile, and how many findings it had. A collaborator working on the filesystem reads one file instead of walking the vault and guessing which JSON goes with which note. Report files are also named so two notes can no longer collide: `a/b.md` and `a-b.md` previously produced the same filename, and the second report written silently replaced the first.
 
+### Fixed
+- The squiggle under a flagged phrase was invisible. Every CSS property was set correctly, but both halves of the wave were drawn in the same 6px cell, so they crossed into an X and the coloured band worked out about two thirds of a pixel wide, which anti-aliases to nothing. Offsetting the second half by half a cell makes the two diagonals alternate into a continuous wave, and widening the band makes it survive a normal-resolution screen. Flagged words now carry a visible coloured squiggle, the way a spell checker marks a misspelling.
+
 ### Changed
 - Flagged phrases are underlined with a squiggle rather than a straight line, so the mark reads as a suggestion rather than as part of your formatting. It follows your theme's colours, and a stretch covered by two or more findings gets a denser one.
 - The JSON report in `.plumbline/` carries a schema version and leads with the grouped, ranked findings. Every hit is still listed separately underneath, so anything reading the file by position keeps working.

@@ -278,23 +278,31 @@
 	--plumbline-squiggle: var(--text-accent);
 	background-image: linear-gradient(
 			45deg,
-			transparent 45%,
-			var(--plumbline-squiggle) 45%,
-			var(--plumbline-squiggle) 55%,
-			transparent 55%
+			transparent 40%,
+			var(--plumbline-squiggle) 40%,
+			var(--plumbline-squiggle) 60%,
+			transparent 60%
 		),
 		linear-gradient(
 			-45deg,
-			transparent 45%,
-			var(--plumbline-squiggle) 45%,
-			var(--plumbline-squiggle) 55%,
-			transparent 55%
+			transparent 40%,
+			var(--plumbline-squiggle) 40%,
+			var(--plumbline-squiggle) 60%,
+			transparent 60%
 		);
 	background-size: 6px 3px;
 	background-repeat: repeat-x;
-	background-position: left bottom;
+	/* The second gradient is offset by HALF a tile. Without that both diagonals
+	   sit in the same 6px cell, cross into an X, and the pattern reads as faint
+	   dots rather than a wave. With it they alternate into a continuous zigzag.
+	   Verified against a screenshot of the running app, not against the computed
+	   style: the previous version had every property set correctly and painted
+	   nothing a reader could see. */
+	background-position:
+		0 100%,
+		3px 100%;
 	/* Room for the squiggle under the descenders, so it never crosses the text. */
-	padding-bottom: 3px;
+	padding-bottom: 4px;
 }
 
 .plumbline-mark-warning {
@@ -305,9 +313,15 @@
 	--plumbline-squiggle: var(--text-error);
 }
 
+/* Two or more findings covering the same words: a tighter, taller wave, so an
+   overlap is visibly denser than a single finding. The half-tile offset has to
+   track the tile width or the zigzag stops joining up. */
 .plumbline-mark-multi {
 	background-size: 5px 4px;
-	padding-bottom: 4px;
+	background-position:
+		0 100%,
+		2.5px 100%;
+	padding-bottom: 5px;
 }
 
 /* The hover popup shown over an underlined finding. CodeMirror's hover-tooltip
