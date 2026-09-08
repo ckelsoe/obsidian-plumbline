@@ -1,5 +1,6 @@
 import { LintResult, Severity } from './engine/types';
 import { scriptureReferences } from './engine/scripture';
+import { lineOf } from './engine/sentences';
 import { summarizeScripture, ScriptureUsage } from './engine/citation';
 
 // A JSON report of one note's findings, written into the vault so an AI
@@ -66,18 +67,6 @@ export interface Report {
 	// is what a positional consumer needs and what the parity oracle diffs
 	// against; the rolled-up view above cannot be un-rolled back into it.
 	hits: ReportFinding[];
-}
-
-// One-based line number of a character offset, counted by newlines before it.
-function lineOf(text: string, offset: number): number {
-	let line = 1;
-	const limit = Math.min(offset, text.length);
-	for (let i = 0; i < limit; i++) {
-		if (text[i] === '\n') {
-			line += 1;
-		}
-	}
-	return line;
 }
 
 export function buildReport(

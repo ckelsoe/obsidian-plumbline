@@ -83,3 +83,19 @@ export function splitParagraphsWithOffsets(text: string): ParagraphSpan[] {
 	}
 	return paragraphs;
 }
+
+// One-based line number of a character offset, counted by newlines before it.
+//
+// Shared rather than kept private to the report: the findings panel labels each
+// section with the line its paragraph starts on, and two implementations of
+// "which line is this" would be two answers the moment one is changed.
+export function lineOf(text: string, offset: number): number {
+	let line = 1;
+	const limit = Math.min(offset, text.length);
+	for (let i = 0; i < limit; i++) {
+		if (text[i] === '\n') {
+			line += 1;
+		}
+	}
+	return line;
+}

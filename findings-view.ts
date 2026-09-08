@@ -172,16 +172,30 @@ export class FindingsView extends ItemView {
 		// reachable and activatable from the keyboard, and its accessible name has
 		// to carry what the two spans below say visually.
 		const summary = sectionSummary(section);
+		// Located by LINE plus the paragraph's opening words, not by a paragraph
+		// ordinal. The ordinal counted headings, so it named a paragraph the
+		// reader would not arrive at by counting; and even correct it is a number
+		// you have to go and count to. A line number matches the editor's own
+		// gutter and the excerpt is recognisable without leaving the panel.
+		const label = `L${section.line}`;
 		const head = wrap.createEl('button', {
 			cls: 'plumbline-section-head',
 			attr: {
 				type: 'button',
-				'aria-label': `Paragraph ${section.paragraph}: ${summary}`,
+				// Leads with the count, because that is what a listener is
+				// deciding on. The excerpt goes last: it ends in whatever
+				// punctuation the prose had, so anything after it collided
+				// ("Read that again.: 1 warning").
+				'aria-label': `${summary} at line ${section.line}: ${section.excerpt}`,
 			},
 		});
 		head.createSpan({
 			cls: 'plumbline-section-name',
-			text: `Paragraph ${section.paragraph}`,
+			text: label,
+		});
+		head.createSpan({
+			cls: 'plumbline-section-excerpt',
+			text: section.excerpt,
 		});
 		head.createSpan({
 			cls: 'plumbline-section-summary',
@@ -198,7 +212,7 @@ export class FindingsView extends ItemView {
 		}
 
 		if (section.collapsed.count > 0) {
-			const key = `${section.paragraph}`;
+			const key = `${section.paragraphIndex}`;
 			const open = this.expanded.has(key);
 			// Occurrences, matching the section header. Counting rules here put
 			// "1 suggestion" under a header reading "5 suggestions".
@@ -215,7 +229,7 @@ export class FindingsView extends ItemView {
 					'aria-expanded': String(open),
 					// The visible text is a count; read aloud it has to say what
 					// activating it does and which paragraph it belongs to.
-					'aria-label': `${open ? 'Hide' : 'Show'} ${n} suggestion${n === 1 ? '' : 's'} in paragraph ${section.paragraph}`,
+					'aria-label': `${open ? 'Hide' : 'Show'} ${n} suggestion${n === 1 ? '' : 's'} at line ${section.line}`,
 				},
 			});
 			toggle.addEventListener('click', () => {

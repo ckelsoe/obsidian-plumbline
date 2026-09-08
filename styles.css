@@ -79,20 +79,39 @@
 	font-size: inherit;
 	color: inherit;
 	display: flex;
-	justify-content: space-between;
+	align-items: baseline;
+	text-align: left;
 	gap: var(--size-4-2);
 	padding: var(--size-4-1) 0;
 	cursor: pointer;
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
+/* Header layout: line reference, the paragraph's opening words, then the count.
+   The excerpt is the only part that flexes, so a narrow sidebar shortens the
+   words rather than pushing the count off the row. */
 .plumbline-section-name {
 	font-weight: var(--font-semibold);
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+}
+
+.plumbline-section-excerpt {
+	flex: 1 1 auto;
+	/* Without min-width a flex item refuses to shrink below its content, so the
+	   ellipsis never engages and the row overflows instead. */
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
 }
 
 .plumbline-section-summary {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
+	flex: 0 0 auto;
 }
 
 /* Suggestions collapse to one counted row per paragraph: never silently hidden,
@@ -173,19 +192,57 @@
    Height is therefore free and already proportional to the prose, which is what
    makes a bar the right rendering rather than a dot. */
 .cm-editor .cm-gutter.plumbline-gutter {
-	width: 6px;
+	/* Wide enough for the bar plus a two-digit count. Colour carries severity
+	   and height carries how much prose is covered, but neither says how MUCH is
+	   wrong, so a paragraph with one finding and one with a hundred looked
+	   identical until you hovered. */
+	width: 20px;
 }
 
 .cm-editor .cm-gutter.plumbline-gutter .cm-gutterElement {
 	padding: 0;
 }
 
+.plumbline-gutter-marker {
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	gap: 2px;
+	height: 100%;
+}
+
 .plumbline-gutter-bar {
 	width: 3px;
 	height: 100%;
-	margin-inline: auto;
 	border-radius: 1px;
 	background-color: var(--text-accent);
+	/* Does not shrink when the numeral is beside it, or a three-digit-ish label
+	   would squeeze the bar to nothing. */
+	flex: 0 0 auto;
+}
+
+/* Weight tiers: one finding, a few, or a lot. Thickness rather than colour,
+   because colour is already spoken for by severity. */
+.plumbline-gutter-bar-w1 {
+	width: 2px;
+}
+
+.plumbline-gutter-bar-w2 {
+	width: 4px;
+}
+
+.plumbline-gutter-bar-w3 {
+	width: 6px;
+}
+
+.plumbline-gutter-count {
+	font-size: var(--font-smallest);
+	line-height: 1.2;
+	color: var(--text-muted);
+	/* The numeral aligns with the paragraph's first line, so it reads as a label
+	   on the top of the bar rather than as floating in the margin. */
+	padding-top: 1px;
+	font-variant-numeric: tabular-nums;
 }
 
 .plumbline-gutter-bar-error {
@@ -221,23 +278,31 @@
 	--plumbline-squiggle: var(--text-accent);
 	background-image: linear-gradient(
 			45deg,
-			transparent 45%,
-			var(--plumbline-squiggle) 45%,
-			var(--plumbline-squiggle) 55%,
-			transparent 55%
+			transparent 40%,
+			var(--plumbline-squiggle) 40%,
+			var(--plumbline-squiggle) 60%,
+			transparent 60%
 		),
 		linear-gradient(
 			-45deg,
-			transparent 45%,
-			var(--plumbline-squiggle) 45%,
-			var(--plumbline-squiggle) 55%,
-			transparent 55%
+			transparent 40%,
+			var(--plumbline-squiggle) 40%,
+			var(--plumbline-squiggle) 60%,
+			transparent 60%
 		);
 	background-size: 6px 3px;
 	background-repeat: repeat-x;
-	background-position: left bottom;
+	/* The second gradient is offset by HALF a tile. Without that both diagonals
+	   sit in the same 6px cell, cross into an X, and the pattern reads as faint
+	   dots rather than a wave. With it they alternate into a continuous zigzag.
+	   Verified against a screenshot of the running app, not against the computed
+	   style: the previous version had every property set correctly and painted
+	   nothing a reader could see. */
+	background-position:
+		0 100%,
+		3px 100%;
 	/* Room for the squiggle under the descenders, so it never crosses the text. */
-	padding-bottom: 3px;
+	padding-bottom: 4px;
 }
 
 .plumbline-mark-warning {
@@ -248,9 +313,15 @@
 	--plumbline-squiggle: var(--text-error);
 }
 
+/* Two or more findings covering the same words: a tighter, taller wave, so an
+   overlap is visibly denser than a single finding. The half-tile offset has to
+   track the tile width or the zigzag stops joining up. */
 .plumbline-mark-multi {
 	background-size: 5px 4px;
-	padding-bottom: 4px;
+	background-position:
+		0 100%,
+		2.5px 100%;
+	padding-bottom: 5px;
 }
 
 /* The hover popup shown over an underlined finding. CodeMirror's hover-tooltip

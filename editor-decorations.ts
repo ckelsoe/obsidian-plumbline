@@ -6,6 +6,7 @@ import {
 	RangeValue,
 	StateEffect,
 	StateField,
+	Text,
 } from '@codemirror/state';
 import {
 	Decoration,
@@ -21,7 +22,11 @@ import {
 import { lint } from './engine/lint';
 import { Diagnostic, ResolvedConfig, Severity } from './engine/types';
 import { coverageSegments, segmentAt } from './underline-coverage';
-import { summarizeSeverities } from './gutter-summary';
+import {
+	countLabel,
+	paragraphLineRange,
+	summarizeSeverities,
+} from './gutter-summary';
 
 // This plugin owns every surface it draws, and shares none of them.
 //
@@ -352,6 +357,8 @@ class SeverityBar extends GutterMarker {
 	constructor(
 		private readonly severity: Severity,
 		private readonly title: string,
+		private readonly weight: number,
+		private readonly count: string,
 	) {
 		super();
 	}
@@ -360,14 +367,27 @@ class SeverityBar extends GutterMarker {
 		return (
 			other instanceof SeverityBar &&
 			other.severity === this.severity &&
-			other.title === this.title
+			other.title === this.title &&
+			other.weight === this.weight &&
+			other.count === this.count
 		);
 	}
 
 	override toDOM(): Node {
-		const el = createDiv({
-			cls: `plumbline-gutter-bar plumbline-gutter-bar-${this.severity}`,
+		// A wrapper, because the bar is a full-height rule and the numeral has to
+		// sit beside it rather than inside and be clipped.
+		const el = createDiv({ cls: 'plumbline-gutter-marker' });
+		el.createDiv({
+			cls: `plumbline-gutter-bar plumbline-gutter-bar-${this.severity} plumbline-gutter-bar-w${this.weight}`,
 		});
+		if (this.count !== '') {
+			// Only past one finding. A numeral on every flagged paragraph is
+			// noise, and the bar already says "at least one".
+			el.createSpan({
+				cls: 'plumbline-gutter-count',
+				text: this.count,
+			});
+		}
 		// A native title rather than a tooltip extension. CodeMirror's tooltip
 		// layer is shared, and the gutter summary is a one-line string, so there
 		// is nothing here worth taking a shared surface for.
@@ -383,21 +403,51 @@ class SeverityBar extends GutterMarker {
 	}
 }
 
+// The document offsets of the paragraph containing this line. The line-number
+// arithmetic lives in gutter-summary.ts so it can be tested without CodeMirror.
+function paragraphSpan(
+	doc: Text,
+	lineNumber: number,
+): { from: number; to: number; first: number } {
+	const { first, last } = paragraphLineRange(
+		doc.lines,
+		(n) => doc.line(n).text.trim() === '',
+		lineNumber,
+	);
+	return { from: doc.line(first).from, to: doc.line(last).to, first };
+}
+
 function severityGutter(): Extension {
 	return gutter({
 		class: 'plumbline-gutter',
-		lineMarker: (view, line) => {
+		lineMarker: (view, block) => {
+			// `block` is a BlockInfo, which carries geometry but no text. The doc
+			// line is what says whether this is blank and which paragraph it is
+			// part of.
+			const line = view.state.doc.lineAt(block.from);
+			if (line.text.trim() === '') {
+				return null;
+			}
+			const para = paragraphSpan(view.state.doc, line.number);
 			const severities: Severity[] = [];
 			view.state
 				.field(findingsField)
-				.between(line.from, line.to, (_from, _to, value) => {
+				.between(para.from, para.to, (_from, _to, value) => {
 					severities.push(value.diagnostic.severity);
 				});
 			if (severities.length === 0) {
 				return null;
 			}
 			const summary = summarizeSeverities(severities);
-			return new SeverityBar(summary.severity, summary.message);
+			// The bar is drawn on every line of the paragraph, so it still spans
+			// the whole block, but the numeral is printed once. Repeating it down
+			// a hard-wrapped paragraph would read as several separate counts.
+			return new SeverityBar(
+				summary.severity,
+				summary.message,
+				summary.weight,
+				line.number === para.first ? countLabel(summary.count) : '',
+			);
 		},
 		// Without this the gutter only recomputes on a document change, so a
 		// debounced pass that adds findings to an unedited line would not draw

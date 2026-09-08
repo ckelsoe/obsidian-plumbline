@@ -10,6 +10,35 @@ import { Severity } from './engine/types';
 export interface GutterSummary {
 	severity: Severity;
 	message: string;
+	// How many findings the paragraph carries. The bar reads this twice: as a
+	// weight tier, and as a numeral once there is more than one.
+	count: number;
+	// Weight tier for the bar's thickness, so volume is legible without
+	// hovering. Colour already carries severity, and a bar that looks identical
+	// for one finding and for a hundred was answering half the question.
+	weight: 1 | 2 | 3;
+}
+
+// Where the tiers sit. Chosen against the rollup threshold, which defaults to 4:
+// tier 2 is "more than a couple", tier 3 is "this paragraph is the problem" and
+// starts where a rule firing this often would itself have rolled up.
+const DENSE = 5;
+const SOME = 2;
+
+export function weightFor(count: number): 1 | 2 | 3 {
+	if (count >= DENSE) return 3;
+	if (count >= SOME) return 2;
+	return 1;
+}
+
+// Above this the numeral stops fitting the gutter, so it reads as "lots".
+const COUNT_CEILING = 99;
+
+// What the bar prints. Empty when there is one finding: a numeral on every
+// flagged paragraph is noise, and the bar's presence already says "one".
+export function countLabel(count: number): string {
+	if (count < 2) return '';
+	return count > COUNT_CEILING ? `${COUNT_CEILING}+` : String(count);
 }
 
 // Worst severity present, which is what colors the bar.
@@ -71,10 +100,42 @@ export function summarizeSeverities(
 		return {
 			severity: 'suggestion',
 			message: 'No findings in this paragraph.',
+			count: 0,
+			weight: 1,
 		};
 	}
 	return {
 		severity: worst(severities),
 		message: `${plural(severities.length, 'finding')} in this paragraph: ${parts.join(', ')}.`,
+		count: severities.length,
+		weight: weightFor(severities.length),
 	};
+}
+
+// The run of non-blank lines around `lineNumber`, as 1-based line numbers.
+//
+// A CodeMirror line is not a paragraph. A soft-wrapped paragraph is one logical
+// line, which is the case contract 3.2 measured, but a writer who hard wraps at
+// eighty columns produces one Markdown paragraph across several lines, and
+// Markdown only ends a paragraph at a BLANK line. Summarizing per line reported
+// each line's findings under a tooltip reading "in this paragraph", and split
+// one paragraph into separate bars while the findings panel showed it as one
+// section. The two surfaces are supposed to agree on the unit.
+//
+// Takes an accessor rather than a document so it can be tested without
+// CodeMirror, the same split the rest of this module exists for.
+export function paragraphLineRange(
+	lineCount: number,
+	isBlank: (lineNumber: number) => boolean,
+	lineNumber: number,
+): { first: number; last: number } {
+	let first = lineNumber;
+	while (first > 1 && !isBlank(first - 1)) {
+		first -= 1;
+	}
+	let last = lineNumber;
+	while (last < lineCount && !isBlank(last + 1)) {
+		last += 1;
+	}
+	return { first, last };
 }

@@ -1,4 +1,4 @@
-import { splitParagraphsWithOffsets } from './engine/sentences';
+import { lineOf, splitParagraphsWithOffsets } from './engine/sentences';
 import { priorityOf } from './engine/rollup';
 import { Finding, Occurrence, Severity } from './engine/types';
 
@@ -29,8 +29,16 @@ export interface PanelRow {
 }
 
 export interface PanelSection {
-	// 1-based, matching what a reader counts down the note.
-	paragraph: number;
+	// The paragraph's position in splitParagraphsWithOffsets order. INTERNAL: a
+	// stable-enough key for collapse state, never a label. It counts every block
+	// including headings, so showing it told the reader to go and count
+	// something they would then get wrong.
+	paragraphIndex: number;
+	// 1-based line the paragraph starts on. This is the locator a writer can
+	// actually use, because it matches the editor's own line numbers.
+	line: number;
+	// The paragraph's opening words, for recognising the passage at a glance.
+	excerpt: string;
 	start: number;
 	end: number;
 	rows: PanelRow[];
@@ -52,6 +60,33 @@ export interface PanelModel {
 	sections: PanelSection[];
 	// Rows the cap is hiding, across every section. Zero when nothing is hidden.
 	hidden: number;
+}
+
+// Characters of opening text a section header shows. Long enough to recognise
+// the passage, short enough not to wrap in a sidebar leaf.
+const EXCERPT_LENGTH = 48;
+
+// The paragraph's opening words.
+//
+// Leading Markdown structure is stripped, so a quoted or listed paragraph shows
+// its words rather than its punctuation. Cut at a word boundary when there is
+// one, because a label ending mid-word reads as corruption rather than as a
+// truncation.
+export function excerptOf(paragraph: string): string {
+	const text = paragraph
+		.replace(/^[>\s]+/, '')
+		.replace(/^(?:[-*+]|\d+\.)[ \t]+/, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+	if (text.length <= EXCERPT_LENGTH) {
+		return text;
+	}
+	const cut = text.slice(0, EXCERPT_LENGTH);
+	const lastSpace = cut.lastIndexOf(' ');
+	// Only honour the word boundary if it leaves most of the excerpt. A very long
+	// first word would otherwise collapse the label to almost nothing.
+	const body = lastSpace > EXCERPT_LENGTH / 2 ? cut.slice(0, lastSpace) : cut;
+	return `${body.trimEnd()}...`;
 }
 
 function rowFor(finding: Finding, occurrences: Occurrence[]): PanelRow {
@@ -153,7 +188,9 @@ export function buildPanelModel(
 		if (kept.length === 0 && !fitsCollapsed) continue;
 
 		sections.push({
-			paragraph: i + 1,
+			paragraphIndex: i + 1,
+			line: lineOf(text, para.start),
+			excerpt: excerptOf(text.slice(para.start, para.end)),
 			start: para.start,
 			end: para.end,
 			rows: kept,
