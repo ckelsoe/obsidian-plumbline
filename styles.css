@@ -55,6 +55,7 @@
 	text-align: left;
 	cursor: pointer;
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: space-between;
 	gap: var(--size-2-3);
 }
@@ -340,6 +341,107 @@
    CodeMirror's own container is an unstyled light box, unreadable on a dark
    theme. `:has()` would be the obvious way to reach the parent and is avoided on
    purpose: the marketplace scan flags it. */
+/* The rule that fired, shown beside the severity tag. Monospace and muted: it is
+   an identifier you copy into `plumbline-disabled-rules`, not prose. */
+.plumbline-hover-head {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-1);
+}
+
+.plumbline-hover-rule,
+.plumbline-finding-rule {
+	font-family: var(--font-monospace);
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	/* An identifier never breaks mid-token. `flagged-register` wrapping to
+	   "flagged-" / "register" cannot be read off the screen and copied into
+	   `plumbline-disabled-rules`, which is the only reason it is shown. */
+	white-space: nowrap;
+}
+
+/* Its own line under the phrase. Sharing the row squeezed it to "flagg..." in a
+   sidebar leaf, which is useless: the whole reason to show the rule is so it can
+   be copied into `plumbline-disabled-rules`, and a truncated identifier cannot
+   be. A full-width flex item forces the wrap without restructuring the row. */
+.plumbline-finding-rule {
+	flex-basis: 100%;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+
+/* The strip beside the scrollbar: where the findings are in the whole document.
+   CodeMirror has no overview ruler, so this is an overlay on `.cm-editor`, which
+   CodeMirror already sets `position: relative` on. It sits OVER the scroller, not
+   inside it, or it would scroll away with the content it maps. */
+.plumbline-ruler {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	inset-inline-end: 0;
+	width: 10px;
+	/* Transparent to the pointer except on the marks themselves, so the strip
+	   never swallows a click meant for the scrollbar underneath it. */
+	pointer-events: none;
+	z-index: 5;
+}
+
+.plumbline-ruler-mark {
+	position: absolute;
+	inset-inline-end: 2px;
+	top: var(--plumbline-ruler-top, 0);
+	width: 6px;
+	height: 3px;
+	border-radius: 1px;
+	cursor: pointer;
+	pointer-events: auto;
+	background-color: var(--text-accent);
+}
+
+.plumbline-ruler-mark:hover {
+	width: 8px;
+}
+
+.plumbline-ruler-mark-error {
+	background-color: var(--text-error);
+}
+
+.plumbline-ruler-mark-warning {
+	background-color: var(--text-warning);
+}
+
+.plumbline-ruler-mark-suggestion {
+	background-color: var(--text-accent);
+}
+
+/* The actions on a finding: swap in the plain word, or turn the rule off for
+   this note. Small and quiet, because the message is the point and these are
+   the follow-up. */
+.plumbline-hover-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	margin-top: var(--size-4-2);
+}
+
+.plumbline-hover-action {
+	padding: var(--size-4-1) var(--size-4-2);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	cursor: pointer;
+}
+
+.plumbline-hover-action:hover,
+.plumbline-hover-action:focus-visible {
+	background: var(--background-modifier-active-hover);
+}
+
 .plumbline-hover {
 	max-width: 340px;
 }

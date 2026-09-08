@@ -85,6 +85,31 @@ export const BASE_RULES: Rule[] = [
 			'myriad',
 			'plethora',
 		],
+		// Only the words with one plain equivalent. `tapestry`, `intricate`,
+		// `meticulous` and `multifaceted` are left without a fix on purpose:
+		// the right word depends on the sentence, and a confident wrong
+		// suggestion costs the writer their own phrasing.
+		replace: {
+			delve: 'dig',
+			delves: 'digs',
+			delved: 'dug',
+			delving: 'digging',
+			underscore: 'show',
+			underscores: 'shows',
+			underscored: 'showed',
+			showcase: 'show',
+			showcases: 'shows',
+			showcased: 'showed',
+			showcasing: 'showing',
+			leverage: 'use',
+			leverages: 'uses',
+			leveraged: 'used',
+			leveraging: 'using',
+			seamless: 'smooth',
+			seamlessly: 'smoothly',
+			myriad: 'many',
+			plethora: 'many',
+		},
 	},
 	{
 		slug: 'summative-closer',

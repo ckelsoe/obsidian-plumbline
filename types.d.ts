@@ -42,4 +42,15 @@ declare module 'obsidian' {
 	interface Editor {
 		cm: EditorView;
 	}
+
+	// The plugin registry. obsidian.d.ts does not declare it, and it is the
+	// supported way to reach a sibling plugin's API at call time, which is what
+	// interop-contract 4.5 requires: resolve on every use, never hold a handle
+	// across the other plugin's reload. Typed as `unknown` on purpose, because
+	// the neighbour's shape is its business and this side must narrow it.
+	interface App {
+		plugins: {
+			getPlugin(id: string): unknown;
+		};
+	}
 }
