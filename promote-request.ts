@@ -4,12 +4,11 @@ import { Diagnostic } from './engine/types';
 // section 7. Pure, so the body wording and the identity are tested rather than
 // eyeballed once in a screenshot.
 
-// Contract section 8 names a `prose-check` category for promoted findings.
-// Annoteca ships no such category (its set is tone, clarify, cut, expand,
-// tighten, source-needed, verse-needed, uncategorized), so this uses the nearest
-// real one rather than inventing a category that would render as uncategorized
-// in the user's vault. The gap is recorded in the rollout plan.
-export const PROMOTE_CATEGORY = 'clarify';
+// Contract section 8's category for a promoted finding. Annoteca resolves it
+// unconditionally, with no setting in front of it, because the marker lands in
+// the note and a reader who never installed this plugin still has to see the
+// comment as itself rather than as uncategorized.
+export const PROMOTE_CATEGORY = 'prose-check';
 
 // The author and source tag Annoteca writes: `[author=plumbline]` and
 // `[source=plumbline:<key>]`.
