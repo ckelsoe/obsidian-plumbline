@@ -169,3 +169,66 @@ describe('matchCase', () => {
 		expect(matchCase('"leverage', 'use')).toBe('use');
 	});
 });
+
+// Plain-word substitutions. Every entry has ONE right answer, which is what
+// earns it a one-click fix; anything context-dependent belongs in
+// flagged-register with no replacement.
+describe('wordy-substitute', () => {
+	const fixFor = (text: string): string | undefined =>
+		applyRules(text, BASE_RULES).find(
+			(d) => d.ruleSlug === 'wordy-substitute',
+		)?.fix;
+
+	it('offers the shorter word', () => {
+		expect(fixFor('We utilize the tool.')).toBe('use');
+		expect(fixFor('This will facilitate the work.')).toBe('help');
+		expect(fixFor('A note regarding the draft.')).toBe('about');
+		expect(fixFor('Prior to the meeting.')).toBe('Before');
+	});
+
+	it('handles the multi-word ones', () => {
+		expect(fixFor('Due to the fact that it rained.')).toBe('Because');
+		expect(fixFor('In order to finish.')).toBe('To');
+		expect(fixFor('At this point in time we stop.')).toBe('Now');
+	});
+
+	it('matches inflected forms', () => {
+		expect(fixFor('She utilized it.')).toBe('used');
+		expect(fixFor('They are utilizing it.')).toBe('using');
+	});
+
+	// Every phrase in the rule must have a replacement, or the rule promises a
+	// fix it cannot give. This one is a substitution list by definition.
+	it('has a replacement for every phrase it flags', () => {
+		const rule = BASE_RULES.find((r) => r.slug === 'wordy-substitute');
+		expect(rule).toBeDefined();
+		for (const phrase of rule?.phrases ?? []) {
+			expect(rule?.replace?.[phrase]).toBeDefined();
+		}
+	});
+});
+
+// Only the doubled hedges get a fix: dropping the second word leaves the
+// meaning untouched. The rest ask the writer to decide what they mean.
+describe('hedge-stack replacements', () => {
+	const diagnosticsFor = (text: string) =>
+		applyRules(text, BASE_RULES).filter(
+			(d) => d.ruleSlug === 'hedge-stack',
+		);
+
+	it('drops the redundant half of a doubled hedge', () => {
+		expect(diagnosticsFor('It may perhaps rain.')[0]?.fix).toBe('may');
+		expect(diagnosticsFor('It could potentially rain.')[0]?.fix).toBe(
+			'could',
+		);
+	});
+
+	it('offers nothing where the writer has to decide', () => {
+		expect(diagnosticsFor('It works to some extent.')[0]?.fix).toBe(
+			undefined,
+		);
+		expect(diagnosticsFor('Generally speaking, it works.')[0]?.fix).toBe(
+			undefined,
+		);
+	});
+});
