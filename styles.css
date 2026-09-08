@@ -417,6 +417,13 @@
 	background-color: var(--text-accent);
 }
 
+/* The row a click on the underline just pointed at. A brief tint, not a
+   selection: it says "this one" and then gets out of the way. */
+.plumbline-finding-revealed {
+	background: var(--background-modifier-hover);
+	border-radius: var(--radius-s);
+}
+
 /* The dialog that turns a finding into a comment. The finding is shown as
    read-only context above the writer's own box, because the reason they are here
    is the thing they should not have to leave to re-read. */

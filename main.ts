@@ -26,6 +26,7 @@ import {
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
 import { Diagnostic, LintResult, ResolvedConfig } from './engine/types';
 import { fileScope } from './engine/file-scope';
+import { lint } from './engine/lint';
 import { buildReport } from './report';
 import { scriptureReferences, scriptureQuotes } from './engine/scripture';
 import { summarizeScripture, Citation } from './engine/citation';
@@ -122,6 +123,9 @@ export default class PlumblinePlugin extends Plugin {
 					annotate: (view, diagnostic) => {
 						void this.annotateFinding(view, diagnostic);
 					},
+					revealInPanel: (view, diagnostic) => {
+						void this.revealFindingInPanel(view, diagnostic);
+					},
 				},
 				{
 					inlineUnderlines: () => this.settings.inlineUnderlines,
@@ -169,6 +173,20 @@ export default class PlumblinePlugin extends Plugin {
 			name: 'Write a flags report for the active note',
 			callback: () => {
 				void this.writeReport();
+			},
+		});
+		this.addCommand({
+			id: 'promote-findings',
+			name: 'Add comments for the findings in this note',
+			callback: () => {
+				void this.promoteAllFindings();
+			},
+		});
+		this.addCommand({
+			id: 'write-folder-reports',
+			name: 'Write flags reports for every note in this folder',
+			callback: () => {
+				void this.writeFolderReports();
 			},
 		});
 		this.addCommand({
@@ -436,6 +454,86 @@ export default class PlumblinePlugin extends Plugin {
 		}
 	}
 
+	// Turn every finding in the active note into comments, in one call.
+	//
+	// A COMMAND, not a setting, and never automatic. Contract 3.4 is explicit
+	// that there is no "promote all" that happens on its own: a finding is
+	// ephemeral and a comment is permanent, and 7.2 says a comment is never
+	// auto-deleted when its finding goes away. Automatic promotion plus never
+	// auto-deleting is a ratchet, where every false positive becomes a thread
+	// the writer has to close by hand forever.
+	//
+	// What 3.4 does allow is exactly this: one deliberate action, with the count
+	// shown before anything is written. The count comes from Annoteca's own
+	// promotion budget, so the confirmation is the one the user already has.
+	//
+	// Sent as ONE call rather than a loop, so the budget sees the real total and
+	// asks once. A loop would slip under the budget every time and defeat it.
+	private async promoteAllFindings(): Promise<void> {
+		try {
+			const view = this.analysis.activeMarkdownView();
+			const file = view?.file;
+			const api = this.annotecaPromoteApi();
+			if (!view || !file) {
+				new Notice('Plumbline: open a note first.');
+				return;
+			}
+			if (api === null) {
+				new Notice('Plumbline: Annoteca is not available.');
+				return;
+			}
+			const text = view.editor.getValue();
+			const result = lint(text, this.resolvedConfig(text));
+			const requests = result.diagnostics
+				.map((d) =>
+					promoteRequestFor(d, text.slice(d.start, d.end), ''),
+				)
+				.filter((r): r is PromoteRequest => r !== null);
+			if (requests.length === 0) {
+				new Notice('Plumbline: nothing to add here.');
+				return;
+			}
+			const created = await api.promote(file.path, requests, text);
+			new Notice(
+				created.length === 0
+					? 'Plumbline: added nothing. They may already have comments.'
+					: `Plumbline: added ${created.length} comment${created.length === 1 ? '' : 's'}.`,
+			);
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not add the comments.');
+		}
+	}
+
+	// Show a finding in the panel, opening the panel first if it is not up.
+	//
+	// The refresh runs before the reveal: a panel that has just opened has not
+	// rendered any rows yet, so focusing one immediately finds nothing.
+	private async revealFindingInPanel(
+		view: EditorView,
+		diagnostic: Diagnostic,
+	): Promise<void> {
+		try {
+			// Only for the note that raised the click, so a click in one split
+			// does not repoint a panel showing another note.
+			const mdView = this.markdownViewFor(view);
+			if (!mdView) return;
+			await this.activateFindingsView();
+			// From the clicked editor, not the active one.
+			this.refreshFor(mdView);
+			for (const leaf of this.app.workspace.getLeavesOfType(
+				FINDINGS_VIEW_TYPE,
+			)) {
+				const panel = leaf.view;
+				if (panel instanceof FindingsView) {
+					panel.revealFinding(diagnostic.ruleSlug, diagnostic.start);
+				}
+			}
+		} catch (err) {
+			console.error(err);
+		}
+	}
+
 	private async activateFindingsView(): Promise<void> {
 		const { workspace } = this.app;
 		const existing = workspace.getLeavesOfType(FINDINGS_VIEW_TYPE)[0];
@@ -474,6 +572,16 @@ export default class PlumblinePlugin extends Plugin {
 		if (!view) {
 			return;
 		}
+		this.refreshFor(view);
+	}
+
+	// Recompute and push the panel for a SPECIFIC editor.
+	//
+	// Split out because a click on an underline has to refresh the note that was
+	// clicked, not whatever the workspace calls active. The handler runs on
+	// mousedown, before focus moves, so in a split the active leaf is still the
+	// other one and the panel would be filled with a different note's findings.
+	private refreshFor(view: MarkdownView): void {
 		const result = this.analysis.analyze(view);
 		this.lastResult = result;
 		this.lastView = view;
@@ -657,19 +765,7 @@ export default class PlumblinePlugin extends Plugin {
 				text,
 				this.analysis.analyze(view),
 			);
-			const adapter = this.app.vault.adapter;
-			if (!(await adapter.exists(REPORT_DIR))) {
-				await adapter.mkdir(REPORT_DIR);
-			}
-			const reportPath = reportPathFor(file.path);
-			await adapter.write(reportPath, JSON.stringify(report, null, 2));
-			await this.updateReportIndex({
-				file: file.path,
-				report: reportPath,
-				profile: report.profile,
-				findings: report.findings.length,
-				updated: new Date().toISOString(),
-			});
+			const reportPath = await this.persistReport(file.path, report);
 			new Notice(
 				`Plumbline: wrote ${report.findings.length} flags to ${reportPath}`,
 			);
@@ -1002,6 +1098,89 @@ export default class PlumblinePlugin extends Plugin {
 			() => this.writeReportIndex(entry),
 		);
 		await this.indexQueue;
+	}
+
+	// Write one report and record it in the index. Shared by the single-note
+	// command and the folder run, so a folder's reports are byte-identical to
+	// the ones a reader would get by running the command on each note.
+	private async persistReport(
+		path: string,
+		report: ReturnType<typeof buildReport>,
+	): Promise<string> {
+		const adapter = this.app.vault.adapter;
+		if (!(await adapter.exists(REPORT_DIR))) {
+			await adapter.mkdir(REPORT_DIR);
+		}
+		const reportPath = reportPathFor(path);
+		await adapter.write(reportPath, JSON.stringify(report, null, 2));
+		await this.updateReportIndex({
+			file: path,
+			report: reportPath,
+			profile: report.profile,
+			findings: report.findings.length,
+			updated: new Date().toISOString(),
+		});
+		return reportPath;
+	}
+
+	// Write a report for every Markdown note in the active note's folder.
+	//
+	// The whole point of the JSON report is a collaborator reading findings off
+	// the filesystem, and that collaborator usually wants a chapter folder, not
+	// one note. Doing it a note at a time was the difference between "hand me
+	// your book" and "hand me your book, one file at a time".
+	//
+	// Reads each file rather than the editor, because only one note is open. A
+	// note with unsaved edits is reported as SAVED, which is the honest answer
+	// for a file-based artifact and is said in the notice.
+	private async writeFolderReports(): Promise<void> {
+		try {
+			const active = this.analysis.activeMarkdownView()?.file;
+			if (!active) {
+				new Notice('Plumbline: open a note first.');
+				return;
+			}
+			const folder = active.parent?.path ?? '';
+			const files = this.app.vault
+				.getMarkdownFiles()
+				.filter((f) => (f.parent?.path ?? '') === folder)
+				.sort((a, b) => a.path.localeCompare(b.path));
+			if (files.length === 0) {
+				new Notice('Plumbline: no notes in that folder.');
+				return;
+			}
+			let written = 0;
+			let findings = 0;
+			let failed = 0;
+			for (const file of files) {
+				try {
+					const text = await this.app.vault.cachedRead(file);
+					const result = lint(text, this.resolvedConfig(text));
+					const report = buildReport(
+						file.path,
+						this.resolvedConfig(text).profileId,
+						text,
+						result,
+					);
+					await this.persistReport(file.path, report);
+					written += 1;
+					findings += report.findings.length;
+				} catch (err) {
+					// One unreadable note does not cost the whole run. The
+					// count in the notice is what actually landed.
+					console.error(err);
+					failed += 1;
+				}
+			}
+			const where = folder === '' ? 'the vault root' : folder;
+			new Notice(
+				`Plumbline: wrote ${written} report${written === 1 ? '' : 's'} for ${where}, ${findings} findings.` +
+					(failed > 0 ? ` ${failed} could not be read.` : ''),
+			);
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not write the reports.');
+		}
 	}
 
 	private async writeReportIndex(entry: ReportIndexEntry): Promise<void> {

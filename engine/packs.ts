@@ -52,6 +52,13 @@ export const BASE_RULES: Rule[] = [
 			'in many ways',
 			'generally speaking',
 		],
+		// Only the doubled hedges, where the fix is to drop the second word and
+		// the meaning is untouched. The rest ask the writer to decide what they
+		// actually mean, which is not a word swap.
+		replace: {
+			'may perhaps': 'may',
+			'could potentially': 'could',
+		},
 	},
 	{
 		slug: 'flagged-register',
@@ -109,6 +116,51 @@ export const BASE_RULES: Rule[] = [
 			seamlessly: 'smoothly',
 			myriad: 'many',
 			plethora: 'many',
+		},
+	},
+	{
+		// Plain-word substitutions: a longer word doing a shorter word's job.
+		// Every entry here has ONE right answer, which is what earns it a
+		// one-click fix; anything context-dependent belongs in flagged-register
+		// with no replacement instead.
+		slug: 'wordy-substitute',
+		packId: BASE_PACK_ID,
+		category: 'C',
+		severity: 'suggestion',
+		message: "A longer word doing a shorter word's job.",
+		phrases: [
+			'utilize',
+			'utilizes',
+			'utilized',
+			'utilizing',
+			'facilitate',
+			'facilitates',
+			'facilitated',
+			'regarding',
+			'prior to',
+			'subsequent to',
+			'in order to',
+			'due to the fact that',
+			'a large number of',
+			'at this point in time',
+			'in the event that',
+		],
+		replace: {
+			utilize: 'use',
+			utilizes: 'uses',
+			utilized: 'used',
+			utilizing: 'using',
+			facilitate: 'help',
+			facilitates: 'helps',
+			facilitated: 'helped',
+			regarding: 'about',
+			'prior to': 'before',
+			'subsequent to': 'after',
+			'in order to': 'to',
+			'due to the fact that': 'because',
+			'a large number of': 'many',
+			'at this point in time': 'now',
+			'in the event that': 'if',
 		},
 	},
 	{

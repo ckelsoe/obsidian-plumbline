@@ -576,6 +576,50 @@ function severityGutter(): Extension {
 	});
 }
 
+// A click on an underlined phrase shows it in the findings panel.
+//
+// The underline always captured the mouse; it simply did nothing with it, while
+// Annoteca's underline right beside it opens its comment. The hover carries the
+// actions, but a hover is timed and easy to miss, and a click is the thing
+// everyone tries first.
+//
+// mousedown, not click, and it never preventDefaults: placing the caret is the
+// primary thing a click on a word does, and this is additive to it.
+function underlineClick(actions: DecorationActions): Extension {
+	return EditorView.domEventHandlers({
+		mousedown: (event, view) => {
+			// Duck-typed, not `instanceof HTMLElement`. An editor in an Obsidian
+			// pop-out window builds its elements from THAT window's
+			// constructors, so a cross-realm instanceof is false and every
+			// click in a popped-out note would return here. `closest` is the
+			// only capability this needs, so asking for it directly is both
+			// the narrower check and the realm-safe one.
+			const target = event.target as HTMLElement | null;
+			if (target === null || typeof target.closest !== 'function') {
+				return false;
+			}
+			if (target.closest('.plumbline-mark') === null) return false;
+			const pos = view.posAtCoords({
+				x: event.clientX,
+				y: event.clientY,
+			});
+			if (pos === null) return false;
+			// The finding under the pointer, narrowest first, so a phrase
+			// covered by two rules shows the one that actually names it rather
+			// than whichever was collected first.
+			const covering = findingsIn(view.state)
+				.filter((d) => d.start <= pos && pos < d.end)
+				.sort((a, b) => a.end - a.start - (b.end - b.start));
+			const hit = covering[0];
+			if (hit === undefined) return false;
+			actions.revealInPanel(view, hit);
+			// FALSE on purpose: CodeMirror carries on and places the caret. A
+			// click on a word is an editing gesture first.
+			return false;
+		},
+	});
+}
+
 // The strip beside the scrollbar showing where the findings are in the whole
 // document, so a long chapter can be read at a glance instead of scrolled.
 //
@@ -677,6 +721,9 @@ export interface DecorationActions {
 	// Turn this finding into an Annoteca comment, so it can be discussed and
 	// answered rather than only seen. The one-way bridge in contract 2.
 	annotate(view: EditorView, diagnostic: Diagnostic): void;
+	// Show this finding in the findings panel, opening the panel if it is not
+	// already up. What a click on the underline does.
+	revealInPanel(view: EditorView, diagnostic: Diagnostic): void;
 }
 
 // The editor integration. One debounced engine pass into one private state field,
@@ -697,6 +744,7 @@ export function plumblineDecorations(
 		),
 		severityGutter(),
 		overviewRuler,
+		underlineClick(actions),
 		findingsHover(actions),
 	];
 }

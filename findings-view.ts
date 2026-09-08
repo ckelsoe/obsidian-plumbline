@@ -9,6 +9,10 @@ import {
 } from './panel-model';
 import type PlumblinePlugin from './main';
 
+// How long the clicked row stays highlighted, in milliseconds. Long enough to
+// catch the eye, short enough not to look like selection.
+const REVEAL_FLASH = 1200;
+
 export const FINDINGS_VIEW_TYPE = 'plumbline-findings';
 
 // A side panel that lists every flag in the active note. It is a dumb renderer:
@@ -78,6 +82,82 @@ export class FindingsView extends ItemView {
 	// their place. Focus is keyed on a stable id rather than a DOM reference,
 	// because the element itself does not survive the repaint.
 	private focusKey: string | undefined;
+
+	// The row this view is currently pointing at, or null when it is not drawn.
+	private rowElement(): HTMLElement | null {
+		if (this.focusKey === undefined) return null;
+		const el = this.containerEl.querySelector(
+			`[data-plumbline-focus="${CSS.escape(this.focusKey)}"]`,
+		);
+		return el instanceof HTMLElement ? el : null;
+	}
+
+	// The offset the row containing `start` is keyed by, which is that row's
+	// first occurrence. Falls back to the clicked offset when no row claims it,
+	// which then simply finds nothing rather than pointing at a wrong row.
+	private rowStartFor(ruleSlug: string, start: number): number {
+		for (const section of this.panelModel()?.sections ?? []) {
+			for (const row of [...section.rows, ...section.collapsed.rows]) {
+				if (row.ruleSlug !== ruleSlug) continue;
+				if (row.occurrences.some((o) => o.start === start)) {
+					return row.occurrences[0]?.start ?? start;
+				}
+			}
+		}
+		return start;
+	}
+
+	// The model the panel is drawing, or null before anything has been pushed.
+	private panelModel() {
+		if (!this.result || !this.targetView) return null;
+		return buildPanelModel(
+			this.targetView.editor.getValue(),
+			this.result.findings,
+			this.showAll ? Number.MAX_SAFE_INTEGER : DEFAULT_ROW_CAP,
+		);
+	}
+
+	// Open the collapsed group of the paragraph holding this offset, so a
+	// suggestion's row exists to be focused.
+	private expandSectionContaining(start: number): void {
+		for (const section of this.panelModel()?.sections ?? []) {
+			if (start >= section.start && start < section.end) {
+				this.expanded.add(`${section.paragraphIndex}`);
+				return;
+			}
+		}
+	}
+
+	// Focus the row for a finding, opening nothing and scrolling the panel to
+	// it. Called when the reader clicks the underline in the editor: the panel
+	// is where the message and the actions live, and finding the row by eye in a
+	// long list is the work this saves.
+	revealFinding(ruleSlug: string, start: number): void {
+		// Rows are keyed by their FIRST occurrence, so clicking the second or
+		// later hit of a rule in one paragraph would build a key that matches
+		// nothing and silently reveal nothing. Resolve the row that actually
+		// contains the clicked offset and key on its first occurrence.
+		this.focusKey = `row:${ruleSlug}:${this.rowStartFor(ruleSlug, start)}`;
+		// A suggestion's row lives inside a collapsed group, so it is not in the
+		// DOM at all until that group is opened. Clicking the underline of a
+		// suggestion would otherwise silently do nothing, which is most of them:
+		// the floor puts every suggestion below it by design.
+		if (this.rowElement() === null) {
+			this.expandSectionContaining(start);
+			this.render();
+		}
+		this.restoreFocus();
+		const el = this.rowElement();
+		if (el !== null) {
+			// `block: 'nearest'` so a row already on screen does not jump the
+			// panel under the reader.
+			el.scrollIntoView({ block: 'nearest' });
+			el.addClass('plumbline-finding-revealed');
+			window.setTimeout(() => {
+				el.removeClass('plumbline-finding-revealed');
+			}, REVEAL_FLASH);
+		}
+	}
 
 	private restoreFocus(): void {
 		if (this.focusKey === undefined) return;
