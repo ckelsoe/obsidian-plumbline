@@ -13,7 +13,11 @@ import {
 	type InlineUnderlines,
 } from './yield-to-comments';
 import { AnnotateModal } from './annotate-modal';
-import { PromoteRequest, promoteRequestFor } from './promote-request';
+import {
+	PROMOTE_CATEGORY,
+	PromoteRequest,
+	promoteRequestFor,
+} from './promote-request';
 import {
 	REPORT_DIR,
 	REPORT_INDEX_PATH,
@@ -847,12 +851,12 @@ export default class PlumblinePlugin extends Plugin {
 			// while to type and the note can move on underneath them. The text
 			// is re-read after the dialog closes and the anchors re-derived from
 			// that, or Annoteca would refuse a stale snapshot.
-			const note = await this.askForComment(
+			const chosen = await this.askForComment(
 				phrase,
 				diagnostic.ruleSlug,
 				diagnostic.message,
 			);
-			if (note === null) {
+			if (chosen === null) {
 				return;
 			}
 			const current = view.state.doc.toString();
@@ -862,7 +866,12 @@ export default class PlumblinePlugin extends Plugin {
 				);
 				return;
 			}
-			const request = promoteRequestFor(diagnostic, phrase, note);
+			const request = promoteRequestFor(
+				diagnostic,
+				phrase,
+				chosen.note,
+				chosen.category,
+			);
 			if (request === null) {
 				new Notice('Plumbline: that finding has no stable ID yet.');
 				return;
@@ -889,16 +898,52 @@ export default class PlumblinePlugin extends Plugin {
 		phrase: string,
 		ruleSlug: string,
 		message: string,
-	): Promise<string | null> {
+	): Promise<{ note: string; category: string } | null> {
+		const categories = this.annotecaCategories();
 		return new Promise((resolve) => {
 			new AnnotateModal(
 				this.app,
 				phrase,
 				ruleSlug,
 				message,
+				categories,
+				PROMOTE_CATEGORY,
 				resolve,
 			).open();
 		});
+	}
+
+	// Annoteca's categories, or an empty list when it cannot tell us.
+	//
+	// Empty means the dialog leaves the picker out rather than offering a
+	// hardcoded list: this plugin does not own that set, and guessing it is how
+	// it goes stale the first time the user adds or renames one. `categories()`
+	// arrived after apiVersion 2 as an additive method, so it is feature-detected
+	// rather than version-gated.
+	private annotecaCategories(): { id: string; name: string }[] {
+		try {
+			const plugin: unknown = this.app.plugins.getPlugin('annoteca');
+			if (plugin === null || typeof plugin !== 'object') return [];
+			const api: unknown = (plugin as { api?: unknown }).api;
+			if (api === null || typeof api !== 'object') return [];
+			const { categories } = api as { categories?: unknown };
+			if (typeof categories !== 'function') return [];
+			const list: unknown = (categories as () => unknown).call(api);
+			if (!Array.isArray(list)) return [];
+			return list
+				.filter(
+					(c): c is { id: string; displayName: string } =>
+						typeof c === 'object' &&
+						c !== null &&
+						typeof (c as { id?: unknown }).id === 'string' &&
+						typeof (c as { displayName?: unknown }).displayName ===
+							'string',
+				)
+				.map((c) => ({ id: c.id, name: c.displayName }));
+		} catch (err) {
+			console.error(err);
+			return [];
+		}
 	}
 
 	// The MarkdownView driving a given CodeMirror editor.

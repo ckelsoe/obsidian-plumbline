@@ -50,13 +50,17 @@ export function promoteRequestFor(
 	diagnostic: Diagnostic,
 	anchorText: string,
 	note: string,
+	// The category the writer chose, or the default when they were not asked.
+	// Validated here rather than trusted: an empty string would create a comment
+	// Annoteca renders as uncategorized.
+	category: string = PROMOTE_CATEGORY,
 ): PromoteRequest | null {
 	const { key } = diagnostic;
 	if (key === undefined || key === '') {
 		return null;
 	}
 	return {
-		category: PROMOTE_CATEGORY,
+		category: category.trim() === '' ? PROMOTE_CATEGORY : category.trim(),
 		body: promoteBody(diagnostic, anchorText, note),
 		anchor: { start: diagnostic.start, end: diagnostic.end },
 		author: PROMOTE_AUTHOR,
