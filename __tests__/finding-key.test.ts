@@ -1,6 +1,7 @@
 import {
 	normalizeAnchor,
 	occurrenceKey,
+	withDiagnosticKeys,
 	withKeys,
 } from '../engine/finding-key';
 import { lint } from '../engine/lint';
@@ -230,5 +231,97 @@ describe('finding identity across a re-lint', () => {
 	it('changes when the flagged phrase itself is edited', () => {
 		const edited = NOTE.replace('Read that again.', 'Read that once more.');
 		expect(keys(edited)).not.toEqual(keys(NOTE));
+	});
+});
+
+// The keys on the raw diagnostics. The editor's hover works in diagnostics, and
+// a comment promoted from it carries this key as its source key. Annoteca is
+// idempotent on that key, so two findings sharing one would mean the second can
+// never be promoted at all: it would look like a duplicate and be skipped.
+describe('withDiagnosticKeys', () => {
+	const TEXT = 'alpha bravo alpha charlie';
+	const at = (ruleSlug: string, start: number, end: number) => ({
+		ruleSlug,
+		packId: 'base',
+		severity: 'warning' as const,
+		message: 'm',
+		start,
+		end,
+	});
+
+	it('gives different rules different keys for the same words', () => {
+		const [a, b] = withDiagnosticKeys(TEXT, [
+			at('one', 0, 5),
+			at('two', 0, 5),
+		]);
+		expect(a?.key).not.toBe(b?.key);
+	});
+
+	it('gives different words different keys', () => {
+		const [a, b] = withDiagnosticKeys(TEXT, [
+			at('r', 0, 5),
+			at('r', 6, 11),
+		]);
+		expect(a?.key).not.toBe(b?.key);
+	});
+
+	// Two identical phrases flagged by one rule. Only the index separates them,
+	// and without it promoting the second would be treated as a duplicate.
+	it('gives repeated identical phrases different keys', () => {
+		const [a, b] = withDiagnosticKeys(TEXT, [
+			at('r', 0, 5),
+			at('r', 12, 17),
+		]);
+		expect(TEXT.slice(0, 5)).toBe(TEXT.slice(12, 17));
+		expect(a?.key).not.toBe(b?.key);
+	});
+
+	it('numbers by position, not by the order it was handed them', () => {
+		const forward = withDiagnosticKeys(TEXT, [
+			at('r', 0, 5),
+			at('r', 12, 17),
+		]);
+		const backward = withDiagnosticKeys(TEXT, [
+			at('r', 12, 17),
+			at('r', 0, 5),
+		]);
+		expect(backward[0]?.key).toBe(forward[1]?.key);
+		expect(backward[1]?.key).toBe(forward[0]?.key);
+	});
+
+	it('leaves the diagnostic otherwise untouched', () => {
+		const [only] = withDiagnosticKeys(TEXT, [at('r', 0, 5)]);
+		expect(only?.start).toBe(0);
+		expect(only?.end).toBe(5);
+		expect(only?.ruleSlug).toBe('r');
+	});
+
+	// The invariant that makes promotion work: the key the hover promotes with
+	// has to be the key the report and the API publish for the same hit, or a
+	// consumer could never match a comment back to its finding.
+	it('agrees with the key withKeys gives the same occurrence', () => {
+		const diagnostics = withDiagnosticKeys(TEXT, [
+			at('r', 0, 5),
+			at('r', 12, 17),
+		]);
+		const [f] = withKeys(TEXT, [
+			{
+				key: '',
+				ruleSlug: 'r',
+				packId: 'base',
+				severity: 'warning',
+				message: 'm',
+				occurrences: [
+					{ start: 0, end: 5, key: '' },
+					{ start: 12, end: 17, key: '' },
+				],
+				confidence: 0.9,
+				priority: 9,
+				rolledUp: false,
+			},
+		]);
+		expect(f?.occurrences.map((o) => o.key)).toEqual(
+			diagnostics.map((d) => d.key),
+		);
 	});
 });

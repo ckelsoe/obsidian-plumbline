@@ -5,7 +5,7 @@
 // prose and has to change when the prose changes, because edited prose is a new
 // finding and the old thread is the record of what was there before.
 
-import { Finding, Occurrence } from './types';
+import { Diagnostic, Finding, Occurrence } from './types';
 
 // Eight hex characters, matching the `[source=plumbline:a1b2c3d4]` line in
 // contract 7.1. Thirty-two bits is plenty here: keys only have to be distinct
@@ -76,6 +76,49 @@ export function occurrenceKey(
 	return shortHash(input);
 }
 
+// The shared counter behind both key assignments below.
+//
+// Note-scoped, because the occurrence index is: a hit cannot number itself
+// without knowing what else the same rule matched with the same words. Returns
+// one key per input, in the order given.
+function assignKeys(
+	text: string,
+	items: readonly { ruleSlug: string; start: number; end: number }[],
+): string[] {
+	// Document order, so the index never depends on the order rules ran in.
+	const order = items
+		.map((item, at) => ({ item, at }))
+		.sort(
+			(a, b) =>
+				a.item.start - b.item.start ||
+				a.item.end - b.item.end ||
+				a.at - b.at,
+		);
+	// Counted per rule AND per anchor text, so only occurrences that are
+	// genuinely indistinguishable share a counter.
+	const seen = new Map<string, number>();
+	const keys = new Array<string>(items.length).fill('');
+	for (const { item, at } of order) {
+		const anchor = text.slice(item.start, item.end);
+		const bucket = `${item.ruleSlug} ${normalizeAnchor(anchor)}`;
+		const index = seen.get(bucket) ?? 0;
+		seen.set(bucket, index + 1);
+		keys[at] = occurrenceKey(item.ruleSlug, anchor, index);
+	}
+	return keys;
+}
+
+// Keys for the raw diagnostics. The editor's hover works in diagnostics rather
+// than findings, and a comment promoted from the hover has to carry the same key
+// the report and the API would give that finding.
+export function withDiagnosticKeys(
+	text: string,
+	diagnostics: readonly Diagnostic[],
+): Diagnostic[] {
+	const keys = assignKeys(text, diagnostics);
+	return diagnostics.map((d, i) => ({ ...d, key: keys[i] ?? '' }));
+}
+
 // Attach keys to every occurrence of every finding, and to the findings
 // themselves.
 //
@@ -101,18 +144,16 @@ export function withKeys(
 		// Counted per anchor text, so only occurrences that are genuinely
 		// indistinguishable share a counter. Two hits with different text never
 		// renumber each other, whatever happens between them.
-		const seen = new Map<string, number>();
+		// Through the same counter the diagnostics use, so a finding's key and
+		// the key on the diagnostic it came from cannot drift apart.
+		const keys = assignKeys(
+			text,
+			ordered.map((o) => ({ ...o, ruleSlug: finding.ruleSlug })),
+		);
 		const keyOf = new Map<Occurrence, string>();
-		for (const occurrence of ordered) {
-			const anchor = text.slice(occurrence.start, occurrence.end);
-			const normalized = normalizeAnchor(anchor);
-			const index = seen.get(normalized) ?? 0;
-			seen.set(normalized, index + 1);
-			keyOf.set(
-				occurrence,
-				occurrenceKey(finding.ruleSlug, anchor, index),
-			);
-		}
+		ordered.forEach((occurrence, i) => {
+			keyOf.set(occurrence, keys[i] ?? '');
+		});
 		const occurrences = finding.occurrences.map((occurrence) => ({
 			...occurrence,
 			key: keyOf.get(occurrence) ?? '',

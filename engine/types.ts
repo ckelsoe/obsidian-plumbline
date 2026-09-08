@@ -23,6 +23,10 @@ export interface Diagnostic {
 	end: number;
 	message: string;
 	packId: string;
+	// Stable identity for this hit, interop-contract 7.2. Optional on the type
+	// because a hand-built test fixture has no reason to invent one; lint() fills
+	// it on every diagnostic it returns, so anything reading a real result has it.
+	key?: string;
 	// What this hit can be replaced with, when the rule names a replacement for
 	// the exact phrase that matched. Absent means there is no single right word
 	// and the decision is the writer's.
