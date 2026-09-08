@@ -27,16 +27,24 @@ const config = (rollupThreshold = DEFAULT_ROLLUP_THRESHOLD) => ({
 
 const flat = () => CONFIDENCE.mechanical;
 
+// Distinct five-character words at offsets 0, 10, 20, 30 and 40, matching the
+// ranges `hit` produces, so every occurrence hashes to its own key rather than
+// every one of them hashing the empty string.
+const TEXT = 'aaaaa     bbbbb     ccccc     ddddd     eeeee     ';
+
 describe('rollup: grouping', () => {
 	it('gives one finding per rule, carrying every occurrence', () => {
 		const out = rollup(
+			TEXT,
 			[hit('a', 0), hit('a', 10), hit('b', 20)],
 			config(),
 			flat,
 		);
 		expect(out).toHaveLength(2);
 		const a = out.find((f) => f.ruleSlug === 'a');
-		expect(a?.occurrences).toEqual([
+		expect(
+			a?.occurrences.map((o) => ({ start: o.start, end: o.end })),
+		).toEqual([
 			{ start: 0, end: 5 },
 			{ start: 10, end: 15 },
 		]);
@@ -45,39 +53,42 @@ describe('rollup: grouping', () => {
 	// The point of the release: a rule firing through a chapter becomes one row.
 	it('marks a rule past the threshold as rolled up, keeping every occurrence', () => {
 		const hits = [0, 10, 20, 30, 40].map((n) => hit('a', n));
-		const [only] = rollup(hits, config(4), flat);
+		const [only] = rollup(TEXT, hits, config(4), flat);
 		expect(only?.rolledUp).toBe(true);
 		expect(only?.occurrences).toHaveLength(5);
 	});
 
 	it('leaves a rule at the threshold unrolled', () => {
 		const hits = [0, 10, 20, 30].map((n) => hit('a', n));
-		expect(rollup(hits, config(4), flat)[0]?.rolledUp).toBe(false);
+		expect(rollup(TEXT, hits, config(4), flat)[0]?.rolledUp).toBe(false);
 	});
 
 	it('honours a per-profile threshold', () => {
 		const hits = [0, 10].map((n) => hit('a', n));
-		expect(rollup(hits, config(1), flat)[0]?.rolledUp).toBe(true);
-		expect(rollup(hits, config(9), flat)[0]?.rolledUp).toBe(false);
+		expect(rollup(TEXT, hits, config(1), flat)[0]?.rolledUp).toBe(true);
+		expect(rollup(TEXT, hits, config(9), flat)[0]?.rolledUp).toBe(false);
 	});
 
 	// A threshold under 1 would roll up a single hit, which reads worse than the
 	// hit itself.
 	it('never rolls up a lone hit, whatever the threshold says', () => {
-		expect(rollup([hit('a', 0)], config(0), flat)[0]?.rolledUp).toBe(false);
-		expect(rollup([hit('a', 0)], config(-5), flat)[0]?.rolledUp).toBe(
+		expect(rollup(TEXT, [hit('a', 0)], config(0), flat)[0]?.rolledUp).toBe(
+			false,
+		);
+		expect(rollup(TEXT, [hit('a', 0)], config(-5), flat)[0]?.rolledUp).toBe(
 			false,
 		);
 	});
 
 	it('returns nothing for no hits', () => {
-		expect(rollup([], config(), flat)).toEqual([]);
+		expect(rollup(TEXT, [], config(), flat)).toEqual([]);
 	});
 });
 
 describe('rollup: ranking', () => {
 	it('puts one error above many suggestions', () => {
 		const out = rollup(
+			TEXT,
 			[
 				hit('err', 100, 'error'),
 				...[0, 10, 20, 30].map((n) => hit('sugg', n, 'suggestion')),
@@ -90,6 +101,7 @@ describe('rollup: ranking', () => {
 
 	it('ranks a repeated rule above a single hit of the same severity', () => {
 		const out = rollup(
+			TEXT,
 			[hit('once', 0), hit('often', 10), hit('often', 20)],
 			config(),
 			flat,
@@ -101,6 +113,7 @@ describe('rollup: ranking', () => {
 	// mechanical rule just by firing more often.
 	it('lets confidence outweigh a higher count', () => {
 		const out = rollup(
+			TEXT,
 			[hit('mech', 0), hit('judg', 10), hit('judg', 20)],
 			config(),
 			(slug) =>
@@ -113,6 +126,7 @@ describe('rollup: ranking', () => {
 	// output depend on which rule happened to fire first.
 	it('breaks ties by position, then by slug', () => {
 		const out = rollup(
+			TEXT,
 			[hit('zebra', 50), hit('alpha', 10)],
 			config(),
 			flat,

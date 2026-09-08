@@ -149,6 +149,13 @@ function isLiteral(
 	return spans.some((span) => at >= span.start && at < span.end);
 }
 
+// Exported so a caller reading a profile id from somewhere other than the note
+// text (the metadata cache, say) validates it against the same grammar the
+// engine does, rather than keeping a second copy that can drift.
+export function isScopeId(value: string): boolean {
+	return isId(value);
+}
+
 function isId(value: string): boolean {
 	return new RegExp(`^${ID}$`).test(value);
 }

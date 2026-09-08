@@ -71,6 +71,6 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 		);
 	};
 
-	const findings = rollup(diagnostics, config, confidenceOf);
+	const findings = rollup(text, diagnostics, config, confidenceOf);
 	return { diagnostics, findings, metrics, spans };
 }

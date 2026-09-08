@@ -49,6 +49,11 @@ export interface Rule {
 export interface Occurrence {
 	start: number; // inclusive UTF-16 offset
 	end: number; // exclusive UTF-16 offset
+	// Stable identity for this one hit, interop-contract 7.2. Assigned by
+	// withKeys() over the whole note, because the index it hashes is the position
+	// among the same rule's hits in this note. A rolled-up finding promotes one
+	// comment per occurrence, and this is the key each of those carries.
+	key: string;
 }
 
 // What the panel, the report and (from PL-E) the API show: one row per rule per
@@ -60,6 +65,10 @@ export interface Occurrence {
 // the underline layer and for the parity check against prose-check-prototype.py,
 // which would otherwise have to learn to roll up too.
 export interface Finding {
+	// This finding's identity for the hub lane: its FIRST occurrence's key.
+	// Promotion does not match on it, because a rolled-up finding creates one
+	// comment per occurrence, each carrying that occurrence's own key.
+	key: string;
 	ruleSlug: string;
 	packId: string;
 	severity: Severity;
