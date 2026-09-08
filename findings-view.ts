@@ -283,12 +283,19 @@ export class FindingsView extends ItemView {
 				'data-plumbline-focus': `row:${key}`,
 				'aria-label':
 					count > 1
-						? `${text}, ${count} occurrences, line ${line}. ${open ? 'Collapse' : 'Expand'}`
-						: `${text}, line ${line}. ${panelRow.message}`,
+						? `${text}, ${panelRow.ruleSlug}, ${count} occurrences, line ${line}. ${open ? 'Collapse' : 'Expand'}`
+						: `${text}, ${panelRow.ruleSlug}, line ${line}. ${panelRow.message}`,
 				...(count > 1 ? { 'aria-expanded': String(open) } : {}),
 			},
 		});
 		head.createSpan({ cls: 'plumbline-finding-text', text });
+		// The rule that fired. Without it the per-note `plumbline-disabled-rules`
+		// setting is unusable: you cannot switch off a rule the app will not
+		// name, and finding the slug meant reading engine/rules.ts.
+		head.createSpan({
+			cls: 'plumbline-finding-rule',
+			text: panelRow.ruleSlug,
+		});
 		if (count > 1) {
 			head.createSpan({
 				cls: 'plumbline-finding-count',

@@ -2,8 +2,12 @@ import { MarkdownView, Notice, Plugin, WorkspaceLeaf } from 'obsidian';
 import { PlumblineSettingTab } from './settings-tab';
 import { AnalysisService } from './analysis-service';
 import { rhythmStatusText, rhythmDetail } from './rhythm-format';
+import type { EditorView } from '@codemirror/view';
 import { plumblineDecorations, relintEditor } from './editor-decorations';
 import { PlumblineApiImpl } from './api';
+import { overlapsAnchor } from './annoteca-guard';
+import { AnnotateModal } from './annotate-modal';
+import { PromoteRequest, promoteRequestFor } from './promote-request';
 import {
 	REPORT_DIR,
 	REPORT_INDEX_PATH,
@@ -14,7 +18,7 @@ import {
 	upsertEntry,
 } from './report-index';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
-import { LintResult, ResolvedConfig } from './engine/types';
+import { Diagnostic, LintResult, ResolvedConfig } from './engine/types';
 import { fileScope } from './engine/file-scope';
 import { buildReport } from './report';
 import { scriptureReferences, scriptureQuotes } from './engine/scripture';
@@ -96,7 +100,17 @@ export default class PlumblinePlugin extends Plugin {
 
 		// Underline flagged phrases in the editor, live.
 		this.registerEditorExtension(
-			plumblineDecorations((text) => this.resolvedConfig(text)),
+			plumblineDecorations((text) => this.resolvedConfig(text), {
+				disableRule: (slug, view) => {
+					void this.disableRuleForView(slug, view);
+				},
+				canReplace: (view, from, to) =>
+					this.canReplaceRange(view, from, to),
+				canAnnotate: () => this.annotecaPromoteApi() !== null,
+				annotate: (view, diagnostic) => {
+					void this.annotateFinding(view, diagnostic);
+				},
+			}),
 		);
 
 		this.registerView(
@@ -642,6 +656,284 @@ export default class PlumblinePlugin extends Plugin {
 		} catch (err) {
 			console.error(err);
 			new Notice('Plumbline: could not write the report.');
+		}
+	}
+
+	// Annoteca's promote surface, or null when it is absent or too old.
+	//
+	// Resolved at call time per contract 4.5, never held across the other
+	// plugin's reload. `promote` arrived with apiVersion 2, so 1 is a real
+	// Annoteca that cannot take a promotion and degrades to no button.
+	private annotecaPromoteApi(): {
+		promote: (
+			path: string,
+			requests: readonly PromoteRequest[],
+			expected: string,
+		) => Promise<readonly unknown[]>;
+	} | null {
+		try {
+			const plugin: unknown = this.app.plugins.getPlugin('annoteca');
+			if (plugin === null || typeof plugin !== 'object') {
+				return null;
+			}
+			const api: unknown = (plugin as { api?: unknown }).api;
+			if (api === null || typeof api !== 'object') {
+				return null;
+			}
+			const { apiVersion, promote } = api as {
+				apiVersion?: unknown;
+				promote?: unknown;
+			};
+			if (typeof apiVersion !== 'number' || apiVersion < 2) {
+				return null;
+			}
+			if (typeof promote !== 'function') {
+				return null;
+			}
+			return api as {
+				promote: (
+					path: string,
+					requests: readonly PromoteRequest[],
+					expected: string,
+				) => Promise<readonly unknown[]>;
+			};
+		} catch (err) {
+			console.error(err);
+			return null;
+		}
+	}
+
+	// Turn one finding into an Annoteca comment.
+	//
+	// The one-way bridge in contract 2: a finding is computed and disappears when
+	// the prose changes, a comment is written into the note and is the record. It
+	// is promoted only on this explicit click, one at a time, so the promotion
+	// budget is never the thing standing between the user and a surprise.
+	private async annotateFinding(
+		view: EditorView,
+		diagnostic: Diagnostic,
+	): Promise<void> {
+		try {
+			const api = this.annotecaPromoteApi();
+			// Resolved from the view that raised the hover, not from whatever is
+			// active by the time the click lands.
+			const file = this.markdownViewFor(view)?.file;
+			if (api === null || !file) {
+				new Notice('Plumbline: Annoteca is not available here.');
+				return;
+			}
+			// The text the anchor offsets were computed against. Annoteca refuses
+			// a stale snapshot rather than writing a marker onto moved prose, so
+			// this has to be the LIVE editor text, not the copy on disk.
+			const text = view.state.doc.toString();
+			const phrase = text.slice(diagnostic.start, diagnostic.end);
+			// Asked BEFORE the snapshot is used, because the writer may take a
+			// while to type and the note can move on underneath them. The text
+			// is re-read after the dialog closes and the anchors re-derived from
+			// that, or Annoteca would refuse a stale snapshot.
+			const note = await this.askForComment(
+				phrase,
+				diagnostic.ruleSlug,
+				diagnostic.message,
+			);
+			if (note === null) {
+				return;
+			}
+			const current = view.state.doc.toString();
+			if (current !== text) {
+				new Notice(
+					'Plumbline: the note changed while you were typing. Try again.',
+				);
+				return;
+			}
+			const request = promoteRequestFor(diagnostic, phrase, note);
+			if (request === null) {
+				new Notice('Plumbline: that finding has no stable ID yet.');
+				return;
+			}
+			const created = await api.promote(file.path, [request], current);
+			new Notice(
+				created.length > 0
+					? 'Plumbline: added an Annoteca comment.'
+					: 'Plumbline: that finding is already annotated.',
+			);
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not add the comment.');
+		}
+	}
+
+	// The writer's own words for a comment, or null if they backed out.
+	//
+	// A promoted comment carrying only the rule's message is a thread with
+	// nothing in it to answer, which is the opposite of why anyone promotes a
+	// finding. Empty is a real answer and distinct from null: it means record
+	// the finding on its own.
+	private askForComment(
+		phrase: string,
+		ruleSlug: string,
+		message: string,
+	): Promise<string | null> {
+		return new Promise((resolve) => {
+			new AnnotateModal(
+				this.app,
+				phrase,
+				ruleSlug,
+				message,
+				resolve,
+			).open();
+		});
+	}
+
+	// The MarkdownView driving a given CodeMirror editor.
+	//
+	// The only reliable link between a CodeMirror view and a note: Obsidian's
+	// editor exposes its `cm`, so the leaf whose editor IS this view is the one
+	// that owns it. Matching on the active leaf instead would be a guess.
+	private markdownViewFor(view: EditorView): MarkdownView | null {
+		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+			const candidate = leaf.view;
+			if (
+				candidate instanceof MarkdownView &&
+				candidate.editor.cm === view
+			) {
+				return candidate;
+			}
+		}
+		return null;
+	}
+
+	// Whether Plumbline may replace a range of prose.
+	//
+	// Interop-contract 4.1 makes Annoteca the only writer of note prose, because
+	// its reject-as-revert holds a byte-for-byte original and that is only true
+	// if one system performed the replacement. A one-click fix is a prose write,
+	// so it yields wherever Annoteca has an anchor. Everywhere else, and whenever
+	// Annoteca is not installed, it goes ahead: the edit is user-initiated, one
+	// phrase, and lands in the editor's own undo history.
+	private canReplaceRange(
+		view: EditorView,
+		from: number,
+		to: number,
+	): boolean {
+		const anchors = this.annotecaAnchors(view);
+		if (anchors === null) {
+			return true;
+		}
+		return !overlapsAnchor(anchors, from, to);
+	}
+
+	// Annoteca's anchor ranges for this editor's text, or null when Annoteca is
+	// absent or too new to understand. Resolved at call time per contract 4.5,
+	// and computed from the LIVE editor text, because the on-disk copy is stale
+	// while there are unsaved edits.
+	private annotecaAnchors(
+		view: EditorView,
+	): readonly { start: number; end: number }[] | null {
+		try {
+			const plugin: unknown = this.app.plugins.getPlugin('annoteca');
+			if (plugin === null || typeof plugin !== 'object') {
+				return null;
+			}
+			const api: unknown = (plugin as { api?: unknown }).api;
+			if (api === null || typeof api !== 'object') {
+				return null;
+			}
+			const { apiVersion, anchorsFor } = api as {
+				apiVersion?: unknown;
+				anchorsFor?: unknown;
+			};
+			// Degrade on an unknown version rather than guess, per contract 7.
+			if (typeof apiVersion !== 'number' || apiVersion < 1) {
+				return null;
+			}
+			if (typeof anchorsFor !== 'function') {
+				return null;
+			}
+			const anchors: unknown = (
+				anchorsFor as (content: string) => unknown
+			).call(api, view.state.doc.toString());
+			if (!Array.isArray(anchors)) {
+				return null;
+			}
+			return anchors.filter(
+				(a): a is { start: number; end: number } =>
+					typeof a === 'object' &&
+					a !== null &&
+					typeof (a as { start?: unknown }).start === 'number' &&
+					typeof (a as { end?: unknown }).end === 'number',
+			);
+		} catch (err) {
+			// A consumer of another plugin's API never lets that plugin's failure
+			// become this one's. Refusing the fix is the safe answer, but a
+			// broken neighbour should not disable a local feature either, so this
+			// reports "no anchors known" and the caller allows the edit.
+			console.error(err);
+			return null;
+		}
+	}
+
+	// Turn a rule off for the note THIS editor is showing, by adding it to that
+	// note's own `plumbline-disabled-rules` frontmatter.
+	//
+	// Frontmatter rather than an inline directive: the button says "here",
+	// meaning this note, and a key at the top is visible and editable later. An
+	// inline `<!-- plumbline: disable ... -->` would be buried wherever the
+	// pointer happened to be.
+	//
+	// Written through `processFrontMatter`, which is Obsidian's supported way to
+	// edit frontmatter. Hand-editing the text would put this plugin in the
+	// business of serialising YAML into a note, which is the class of thing
+	// interop-contract 4.1 keeps to one owner.
+	private async disableRuleForView(
+		slug: string,
+		view: EditorView,
+	): Promise<void> {
+		try {
+			// Resolved from the view that raised the hover, not from whatever is
+			// active now. A hover survives a leaf change, so "the active note"
+			// could be a different file by the time the button is pressed, and
+			// this write would land in it.
+			const file = this.markdownViewFor(view)?.file;
+			if (!file) {
+				new Notice('Plumbline: that note is no longer open.');
+				return;
+			}
+			let already = false;
+			// Typed at the boundary. Obsidian declares the callback's argument as
+			// `any`, so without this every read off it is an unsafe access.
+			await this.app.fileManager.processFrontMatter(
+				file,
+				(fm: Record<string, unknown>) => {
+					const raw: unknown = fm['plumbline-disabled-rules'];
+					// Tolerant of what is already there: a hand-written single
+					// value, a list, or nothing. A malformed key is replaced rather
+					// than appended to, since appending to a string would produce
+					// neither a list nor a scalar.
+					const current = Array.isArray(raw)
+						? raw.filter((v): v is string => typeof v === 'string')
+						: typeof raw === 'string'
+							? [raw]
+							: [];
+					if (current.includes(slug)) {
+						already = true;
+						return;
+					}
+					fm['plumbline-disabled-rules'] = [...current, slug];
+				},
+			);
+			new Notice(
+				already
+					? `Plumbline: ${slug} is already off in this note.`
+					: `Plumbline: ${slug} is off in this note.`,
+			);
+			// The frontmatter write is a document change, so the debounced pass
+			// will re-lint on its own. This makes it immediate, which is what a
+			// button press should look like.
+			this.applyConfigChange();
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not turn that rule off.');
 		}
 	}
 

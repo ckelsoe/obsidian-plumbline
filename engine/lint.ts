@@ -1,6 +1,7 @@
 import { LintResult, Metrics, ResolvedConfig } from './types';
 import { protectedSpans, maskSpans, SKIP_KIND } from './protected-spans';
 import { fileScope } from './file-scope';
+import { withDiagnosticKeys } from './finding-key';
 import { applyRules } from './apply-rules';
 import { applyHeuristics, heuristicConfidence } from './heuristics';
 import { CONFIDENCE, confidenceFor, rollup } from './rollup';
@@ -48,6 +49,9 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 				...applyHeuristics(prose, sentences, disabled),
 			];
 	diagnostics.sort((a, b) => a.start - b.start || a.end - b.end);
+	// Keyed once, here, so the hover, the panel, the report and a promoted
+	// comment all name the same finding the same way.
+	const keyed = withDiagnosticKeys(text, diagnostics);
 
 	// Confidence lives on the rule record, not on the hit, so it is resolved here
 	// where both rule sets are in scope. A mechanical rule is one the config
@@ -71,6 +75,6 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 		);
 	};
 
-	const findings = rollup(text, diagnostics, config, confidenceOf);
-	return { diagnostics, findings, metrics, spans };
+	const findings = rollup(text, keyed, config, confidenceOf);
+	return { diagnostics: keyed, findings, metrics, spans };
 }

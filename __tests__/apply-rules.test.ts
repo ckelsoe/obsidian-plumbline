@@ -1,4 +1,4 @@
-import { applyRules } from '../engine/apply-rules';
+import { applyRules, matchCase } from '../engine/apply-rules';
 import { BASE_RULES } from '../engine/packs';
 
 describe('applyRules', () => {
@@ -111,5 +111,61 @@ describe('applyRules', () => {
 				(d) => d.ruleSlug,
 			),
 		).not.toContain('trailing-participial');
+	});
+});
+
+// The replacement a finding can offer. Only some phrases have one: "leverage"
+// has a plain equivalent and "intricate" does not, and a confident wrong
+// suggestion costs the writer their own phrasing.
+describe('applyRules: replacements', () => {
+	const fixFor = (text: string): string | undefined =>
+		applyRules(text, BASE_RULES).find((d) => d.fix !== undefined)?.fix;
+
+	it('carries the replacement for a phrase that has one', () => {
+		expect(fixFor('They leverage the tool.')).toBe('use');
+		expect(fixFor('A myriad of options.')).toBe('many');
+	});
+
+	it('offers nothing for a phrase with no single right word', () => {
+		const found = applyRules('An intricate tapestry.', BASE_RULES);
+		expect(found.length).toBeGreaterThan(0);
+		expect(found.every((d) => d.fix === undefined)).toBe(true);
+	});
+
+	// The phrase list is matched case-insensitively, so a sentence-opening word
+	// matches its lower-case entry. Substituting the raw replacement would
+	// quietly lower-case the writer's first word.
+	it('carries the capitalisation of the word it replaces', () => {
+		expect(fixFor('Leverage the tool.')).toBe('Use');
+	});
+
+	it('matches the inflected form, not just the base word', () => {
+		expect(fixFor('She leveraged it.')).toBe('used');
+		expect(fixFor('They are leveraging it.')).toBe('using');
+	});
+});
+
+describe('matchCase', () => {
+	it('leaves a lower-case match alone', () => {
+		expect(matchCase('leverage', 'use')).toBe('use');
+	});
+
+	it('capitalises for a capitalised match', () => {
+		expect(matchCase('Leverage', 'use')).toBe('Use');
+	});
+
+	// An all-caps match is shouting; its replacement should not inherit that,
+	// only the leading capital.
+	it('does not shout back at an all-caps match', () => {
+		expect(matchCase('LEVERAGE', 'use')).toBe('Use');
+	});
+
+	it('handles an empty match without throwing', () => {
+		expect(matchCase('', 'use')).toBe('use');
+	});
+
+	// A match starting with a non-letter has no case to carry.
+	it('leaves the replacement alone when the match starts with punctuation', () => {
+		expect(matchCase('"leverage', 'use')).toBe('use');
 	});
 });

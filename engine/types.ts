@@ -23,6 +23,14 @@ export interface Diagnostic {
 	end: number;
 	message: string;
 	packId: string;
+	// Stable identity for this hit, interop-contract 7.2. Optional on the type
+	// because a hand-built test fixture has no reason to invent one; lint() fills
+	// it on every diagnostic it returns, so anything reading a real result has it.
+	key?: string;
+	// What this hit can be replaced with, when the rule names a replacement for
+	// the exact phrase that matched. Absent means there is no single right word
+	// and the decision is the writer's.
+	fix?: string;
 }
 
 // A rule as data, not code. A mechanical rule flags any of its `phrases`, matched
@@ -36,6 +44,13 @@ export interface Rule {
 	severity: Severity;
 	message: string;
 	phrases: string[];
+	// Plain-word replacements, keyed by the phrase as written in `phrases`.
+	//
+	// Deliberately PER PHRASE and optional. "leverage" has one plain equivalent
+	// and "intricate" does not, so a rule carries fixes for the phrases that have
+	// a right answer and stays silent on the rest. Offering a wrong word is worse
+	// than offering none: the writer would have to undo it and lose their own.
+	replace?: Record<string, string>;
 	// How often this rule is right when it fires, 0..1. Ranking multiplies by it,
 	// so a rule that is usually correct outranks a noisy one with the same
 	// severity and count. Omitted means the default for the rule's kind, which is

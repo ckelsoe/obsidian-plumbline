@@ -22,6 +22,7 @@ import {
 import { lint } from './engine/lint';
 import { Diagnostic, ResolvedConfig, Severity } from './engine/types';
 import { coverageSegments, segmentAt } from './underline-coverage';
+import { rulerMarkTitle, rulerMarks } from './ruler-marks';
 import {
 	countLabel,
 	paragraphLineRange,
@@ -212,20 +213,109 @@ function severityLabel(severity: Severity): string {
 	return 'Suggestion';
 }
 
-// One finding row for the popup: a coloured severity tag and the rule message.
-function renderFinding(diagnostic: Diagnostic): HTMLElement {
+// One finding row for the popup: a coloured severity tag, the rule that fired,
+// and its message.
+//
+// The rule NAME is not decoration. It is the only way to find out what to put in
+// `plumbline-disabled-rules` when a rule is wrong for your voice, and until it
+// was shown here that per-note setting could only be used by reading the
+// plugin's source. Vale names the rule on every finding for the same reason;
+// architecture.md section 6 says to borrow exactly that.
+function renderFinding(
+	view: EditorView,
+	diagnostic: Diagnostic,
+	actions: DecorationActions,
+): HTMLElement {
 	const el = createDiv({ cls: 'plumbline-hover-item' });
-	el.createSpan({
+	const head = el.createDiv({ cls: 'plumbline-hover-head' });
+	head.createSpan({
 		cls: `plumbline-hover-tag plumbline-hover-tag-${diagnostic.severity}`,
 		text: severityLabel(diagnostic.severity),
 	});
+	head.createSpan({
+		cls: 'plumbline-hover-rule',
+		text: diagnostic.ruleSlug,
+	});
 	el.createSpan({ cls: 'plumbline-hover-text', text: diagnostic.message });
+
+	const row = el.createDiv({ cls: 'plumbline-hover-actions' });
+	const { fix } = diagnostic;
+	if (fix !== undefined) {
+		const phrase = view.state.doc.sliceString(
+			diagnostic.start,
+			diagnostic.end,
+		);
+		const allowed = actions.canReplace(
+			view,
+			diagnostic.start,
+			diagnostic.end,
+		);
+		const apply = row.createEl('button', {
+			cls: 'plumbline-hover-action',
+			text: `Use "${fix}"`,
+			attr: {
+				type: 'button',
+				// The visible text is two words out of context. Read aloud it has
+				// to say what is being replaced and with what.
+				'aria-label': allowed
+					? `Replace "${phrase}" with "${fix}"`
+					: `Cannot replace "${phrase}": Annoteca has a comment on it`,
+				...(allowed
+					? {}
+					: {
+							disabled: 'true',
+							title: 'Annoteca has a comment anchored here, so it owns this text.',
+						}),
+			},
+		});
+		apply.addEventListener('click', () => {
+			if (!allowed) {
+				return;
+			}
+			// A plain document change, so it lands in the editor's own undo
+			// history and one ctrl+Z puts the writer's word back. The tooltip
+			// closes on the change (hideOnChange), which is what should happen:
+			// the finding it described is gone.
+			view.dispatch({
+				changes: {
+					from: diagnostic.start,
+					to: diagnostic.end,
+					insert: fix,
+				},
+			});
+		});
+	}
+	if (actions.canAnnotate()) {
+		const annotate = row.createEl('button', {
+			cls: 'plumbline-hover-action',
+			text: 'Annotate',
+			attr: {
+				type: 'button',
+				'aria-label': `Turn this ${diagnostic.ruleSlug} finding into an Annoteca comment`,
+				title: 'Create a comment here, so this can be discussed and answered.',
+			},
+		});
+		annotate.addEventListener('click', () => {
+			actions.annotate(view, diagnostic);
+		});
+	}
+	const off = row.createEl('button', {
+		cls: 'plumbline-hover-action',
+		text: 'Turn off here',
+		attr: {
+			type: 'button',
+			'aria-label': `Turn off ${diagnostic.ruleSlug} for this note`,
+		},
+	});
+	off.addEventListener('click', () => {
+		actions.disableRule(diagnostic.ruleSlug, view);
+	});
 	return el;
 }
 
 // The hover popup on an underlined phrase. Reads the same field the underlines
 // read, so the two cannot disagree.
-function findingsHover(): Extension {
+function findingsHover(actions: DecorationActions): Extension {
 	return hoverTooltip(
 		(view, pos, side): Tooltip | null => {
 			// `end` is EXCLUSIVE, matching Span, report.ts's slice and
@@ -270,7 +360,7 @@ function findingsHover(): Extension {
 					const dom = createDiv({ cls: 'plumbline-hover' });
 					let host: HTMLElement | null = null;
 					for (const d of covering) {
-						dom.appendChild(renderFinding(d));
+						dom.appendChild(renderFinding(view, d, actions));
 					}
 					return {
 						dom,
@@ -458,6 +548,109 @@ function severityGutter(): Extension {
 	});
 }
 
+// The strip beside the scrollbar showing where the findings are in the whole
+// document, so a long chapter can be read at a glance instead of scrolled.
+//
+// CodeMirror has no overview ruler, so this is a plain absolutely-positioned
+// overlay on `.cm-editor`, which CodeMirror already sets `position: relative`
+// on. It sits over the scroller rather than inside it, or it would scroll away
+// with the content it is a map of.
+const overviewRuler = ViewPlugin.fromClass(
+	class {
+		private readonly dom: HTMLElement;
+
+		constructor(private readonly view: EditorView) {
+			this.dom = createDiv({ cls: 'plumbline-ruler' });
+			view.dom.appendChild(this.dom);
+			this.draw();
+		}
+
+		update(update: ViewUpdate): void {
+			// Redrawn when the findings change, and when the document does
+			// because every mark's position is a fraction of the length.
+			if (
+				update.docChanged ||
+				update.startState.field(findingsField) !==
+					update.state.field(findingsField)
+			) {
+				this.draw();
+			}
+		}
+
+		destroy(): void {
+			this.dom.remove();
+		}
+
+		private draw(): void {
+			this.dom.empty();
+			const marks = rulerMarks(
+				findingsIn(this.view.state),
+				this.view.state.doc.length,
+			);
+			for (const mark of marks) {
+				// A real button, not a clickable div. It navigates, so it has to
+				// be reachable and activatable from the keyboard, and a `title`
+				// alone is neither a focus stop nor an accessible name.
+				const el = this.dom.createEl('button', {
+					cls: `plumbline-ruler-mark plumbline-ruler-mark-${mark.severity}`,
+					attr: {
+						type: 'button',
+						title: rulerMarkTitle(mark),
+						'aria-label': rulerMarkTitle(mark),
+					},
+				});
+				// A custom property, not an inline `top`. The position is
+				// computed so it cannot live in styles.css, but the DECLARATION
+				// can: the stylesheet still owns how a mark is positioned and
+				// this passes it the one number it cannot know. Percent, so the
+				// mark keeps its place when the editor is resized without a
+				// redraw.
+				el.style.setProperty(
+					'--plumbline-ruler-top',
+					`${mark.position * 100}%`,
+				);
+				el.addEventListener('click', () => {
+					this.view.dispatch({
+						selection: { anchor: mark.offset },
+						effects: EditorView.scrollIntoView(mark.offset, {
+							y: 'center',
+						}),
+					});
+					this.view.focus();
+				});
+			}
+		}
+	},
+);
+
+// What the hover's buttons need from the plugin. Passed in rather than reached
+// for, so this module still knows nothing about Obsidian beyond the DOM helpers.
+export interface DecorationActions {
+	// Turn a rule off for the note THIS editor is showing. The plugin owns it
+	// because it writes the note's frontmatter, which is a vault operation.
+	//
+	// The view is passed rather than resolved later. Reading "the active note"
+	// at click time writes to whichever leaf is focused by then, and a hover
+	// stays up across a leaf change, so a click could put the rule in a
+	// different file from the one whose finding was clicked.
+	disableRule(slug: string, view: EditorView): void;
+	// Whether Plumbline may replace this range.
+	//
+	// Interop-contract 4.1 makes Annoteca the only writer of note prose, so a
+	// replacement inside one of its anchors would break the byte-for-byte
+	// original its reject-as-revert depends on. False means the fix is offered
+	// but refused, with the reason on the button.
+	canReplace(view: EditorView, from: number, to: number): boolean;
+	// Whether Annoteca is present and new enough to accept a promoted comment.
+	// Checked at render time so the button is simply absent when it cannot work,
+	// rather than offered and then failing (contract: degrade to unpaired
+	// behaviour on an absent or unknown apiVersion).
+	canAnnotate(): boolean;
+	// Turn this finding into an Annoteca comment, so it can be discussed and
+	// answered rather than only seen. The one-way bridge in contract 2.
+	annotate(view: EditorView, diagnostic: Diagnostic): void;
+}
+
 // The editor integration. One debounced engine pass into one private state field,
 // read by three surfaces this plugin owns outright.
 //
@@ -465,13 +658,15 @@ function severityGutter(): Extension {
 // are current.
 export function plumblineDecorations(
 	getConfig: (text: string) => ResolvedConfig,
+	actions: DecorationActions,
 ): Extension {
 	return [
 		findingsField,
 		findingsPass(getConfig),
 		EditorView.decorations.compute([findingsField], buildUnderlines),
 		severityGutter(),
-		findingsHover(),
+		overviewRuler,
+		findingsHover(actions),
 	];
 }
 
