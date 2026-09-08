@@ -2,6 +2,7 @@ import {
 	DEFAULT_ROW_CAP,
 	buildPanelModel,
 	sectionSummary,
+	excerptOf,
 } from '../panel-model';
 import { CONFIDENCE, priorityOf } from '../engine/rollup';
 import { Finding, Severity } from '../engine/types';
@@ -40,7 +41,7 @@ describe('buildPanelModel: grouping by paragraph', () => {
 			finding('a', 'warning', [0]),
 			finding('b', 'warning', [P2_START]),
 		]);
-		expect(m.sections.map((s) => s.paragraph)).toEqual([1, 2]);
+		expect(m.sections.map((s) => s.paragraphIndex)).toEqual([1, 2]);
 		expect(m.sections[0]?.rows[0]?.ruleSlug).toBe('a');
 		expect(m.sections[1]?.rows[0]?.ruleSlug).toBe('b');
 	});
@@ -59,7 +60,7 @@ describe('buildPanelModel: grouping by paragraph', () => {
 	it('skips a paragraph with nothing in it', () => {
 		const m = buildPanelModel(TEXT, [finding('a', 'warning', [0])]);
 		expect(m.sections).toHaveLength(1);
-		expect(m.sections[0]?.paragraph).toBe(1);
+		expect(m.sections[0]?.paragraphIndex).toBe(1);
 	});
 
 	it('has no sections for no findings', () => {
@@ -294,7 +295,7 @@ describe('buildPanelModel: an occurrence lands in one paragraph only', () => {
 		};
 		const m = buildPanelModel(TEXT, [spanning]);
 		expect(m.sections).toHaveLength(1);
-		expect(m.sections[0]?.paragraph).toBe(1);
+		expect(m.sections[0]?.paragraphIndex).toBe(1);
 		expect(m.sections[0]?.counts.warning).toBe(1);
 	});
 
@@ -302,6 +303,103 @@ describe('buildPanelModel: an occurrence lands in one paragraph only', () => {
 		const m = buildPanelModel(TEXT, [
 			finding('b', 'warning', [P2_START + 2]),
 		]);
-		expect(m.sections.map((s) => s.paragraph)).toEqual([2]);
+		expect(m.sections.map((s) => s.paragraphIndex)).toEqual([2]);
+	});
+});
+
+// How a section is LOCATED. The paragraph ordinal used to be the label, and it
+// counted headings, so it named a paragraph the reader would never arrive at by
+// counting. Line number plus opening words replaced it.
+describe('buildPanelModel: locating a section', () => {
+	const NOTE = [
+		'# Chapter One',
+		'',
+		'A clean opening paragraph with nothing wrong in it.',
+		'',
+		'## A subheading',
+		'',
+		'Read that again.',
+	].join('\n');
+
+	const model = () =>
+		buildPanelModel(NOTE, [
+			{
+				key: 'k',
+				ruleSlug: 'reader-direction',
+				packId: 'base',
+				severity: 'warning',
+				message: 'Cut it.',
+				occurrences: [
+					{
+						start: NOTE.indexOf('Read that again.'),
+						end: NOTE.indexOf('Read that again.') + 15,
+						key: 'o',
+					},
+				],
+				confidence: 0.9,
+				priority: 9,
+				rolledUp: false,
+			},
+		]);
+
+	it('reports the line the paragraph starts on', () => {
+		// The flagged line is line 7 of the note, which is what the editor's own
+		// gutter shows.
+		expect(model().sections[0]?.line).toBe(7);
+	});
+
+	it('carries the opening words as the excerpt', () => {
+		expect(model().sections[0]?.excerpt).toBe('Read that again.');
+	});
+
+	// The bug this replaced: two headings consumed ordinals 1 and 3, so what a
+	// reader calls the second paragraph was labelled "Paragraph 4". The ordinal
+	// still counts that way, which is exactly why it is no longer a label.
+	it('keeps the heading-counting ordinal internal', () => {
+		expect(model().sections[0]?.paragraphIndex).toBe(4);
+	});
+});
+
+describe('excerptOf', () => {
+	it('collapses whitespace and trims', () => {
+		expect(excerptOf('  Some   prose\n  wrapped here.  ')).toBe(
+			'Some prose wrapped here.',
+		);
+	});
+
+	it('strips a leading blockquote marker', () => {
+		expect(excerptOf('> Quoted prose here.')).toBe('Quoted prose here.');
+	});
+
+	it('strips a leading list marker', () => {
+		expect(excerptOf('- A listed point.')).toBe('A listed point.');
+		expect(excerptOf('1. A numbered point.')).toBe('A numbered point.');
+	});
+
+	it('leaves a short paragraph whole, with no marker', () => {
+		expect(excerptOf('Short enough.')).toBe('Short enough.');
+	});
+
+	// A label ending mid-word reads as corruption rather than as a truncation.
+	it('cuts a long paragraph at a word boundary', () => {
+		const long =
+			'This opening sentence runs on well past the excerpt limit and keeps going.';
+		const out = excerptOf(long);
+		expect(out.endsWith('...')).toBe(true);
+		expect(out.length).toBeLessThanOrEqual(51);
+		const body = out.slice(0, -3);
+		expect(long.startsWith(body)).toBe(true);
+		// The cut landed BETWEEN words: the next character in the original is a
+		// space, so the last kept word is whole. A hard slice at the limit lands
+		// mid-word and reads as corruption rather than as a truncation.
+		expect(long[body.length]).toBe(' ');
+		expect(body.endsWith(' ')).toBe(false);
+	});
+
+	// A single very long word has no boundary worth honouring; cutting at the
+	// last space would collapse the label to almost nothing.
+	it('cuts mid-word rather than return almost nothing', () => {
+		const out = excerptOf(`Aa ${'x'.repeat(80)}`);
+		expect(out.length).toBeGreaterThan(40);
 	});
 });
