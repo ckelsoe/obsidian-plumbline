@@ -15,15 +15,25 @@ export class AnnotateModal extends Modal {
 	// inferred from the DOM.
 	private decided = false;
 	private note = '';
+	private category: string;
 
 	constructor(
 		app: App,
 		private readonly phrase: string,
 		private readonly ruleSlug: string,
 		private readonly message: string,
-		private readonly onDecision: (note: string | null) => void,
+		// The categories Annoteca offers, in the user's own order, and the one
+		// to start on. Passed in rather than looked up here: this module knows
+		// nothing about the other plugin, and an empty list means Annoteca could
+		// not tell us, so the picker is left out entirely.
+		private readonly categories: readonly { id: string; name: string }[],
+		private readonly defaultCategory: string,
+		private readonly onDecision: (
+			decision: { note: string; category: string } | null,
+		) => void,
 	) {
 		super(app);
+		this.category = defaultCategory;
 	}
 
 	onOpen(): void {
@@ -45,6 +55,23 @@ export class AnnotateModal extends Modal {
 			cls: 'plumbline-annotate-message',
 			text: this.message,
 		});
+
+		if (this.categories.length > 0) {
+			new Setting(contentEl)
+				.setName('Category')
+				.setDesc(
+					'Which kind of comment this is. These are the categories you already use.',
+				)
+				.addDropdown((drop) => {
+					for (const c of this.categories) {
+						drop.addOption(c.id, c.name);
+					}
+					drop.setValue(this.category);
+					drop.onChange((value) => {
+						this.category = value;
+					});
+				});
+		}
 
 		new Setting(contentEl)
 			.setName('Your comment')
@@ -94,15 +121,15 @@ export class AnnotateModal extends Modal {
 
 	private submit(): void {
 		this.decided = true;
-		this.onDecision(this.note.trim());
+		this.onDecision({ note: this.note.trim(), category: this.category });
 		this.close();
 	}
 
 	onClose(): void {
 		this.contentEl.empty();
 		if (!this.decided) {
-			// Backed out. `null`, distinct from an empty string, which means
-			// "add it with no words of mine".
+			// Backed out. `null`, distinct from an empty note, which means "add
+			// it with no words of mine".
 			this.decided = true;
 			this.onDecision(null);
 		}

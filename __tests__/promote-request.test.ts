@@ -124,3 +124,34 @@ describe('promoteBody with a written note', () => {
 		).toContain('Why?');
 	});
 });
+
+// The category the writer picks in the dialog, from Annoteca's own list.
+describe('promoteRequestFor: the chosen category', () => {
+	it('uses the category it was given', () => {
+		expect(
+			promoteRequestFor(diagnostic, 'leverage', '', 'tone')?.category,
+		).toBe('tone');
+	});
+
+	it('falls back to prose-check when none was chosen', () => {
+		expect(promoteRequestFor(diagnostic, 'leverage', '')?.category).toBe(
+			PROMOTE_CATEGORY,
+		);
+	});
+
+	// An empty or blank category would create a comment Annoteca renders as
+	// uncategorized, which is worse than the default.
+	it('refuses a blank category rather than writing one', () => {
+		for (const raw of ['', '   ']) {
+			expect(
+				promoteRequestFor(diagnostic, 'leverage', '', raw)?.category,
+			).toBe(PROMOTE_CATEGORY);
+		}
+	});
+
+	it('trims what it is given', () => {
+		expect(
+			promoteRequestFor(diagnostic, 'leverage', '', '  tone  ')?.category,
+		).toBe('tone');
+	});
+});
