@@ -13,6 +13,7 @@ import {
 	type InlineUnderlines,
 } from './yield-to-comments';
 import { AnnotateModal } from './annotate-modal';
+import type { AnnotecaApi } from './annoteca-api';
 import {
 	PROMOTE_CATEGORY,
 	PromoteRequest,
@@ -784,13 +785,7 @@ export default class PlumblinePlugin extends Plugin {
 	// Resolved at call time per contract 4.5, never held across the other
 	// plugin's reload. `promote` arrived with apiVersion 2, so 1 is a real
 	// Annoteca that cannot take a promotion and degrades to no button.
-	private annotecaPromoteApi(): {
-		promote: (
-			path: string,
-			requests: readonly PromoteRequest[],
-			expected: string,
-		) => Promise<readonly unknown[]>;
-	} | null {
+	private annotecaPromoteApi(): Pick<AnnotecaApi, 'promote'> | null {
 		try {
 			const plugin: unknown = this.app.plugins.getPlugin('annoteca');
 			if (plugin === null || typeof plugin !== 'object') {
@@ -810,13 +805,11 @@ export default class PlumblinePlugin extends Plugin {
 			if (typeof promote !== 'function') {
 				return null;
 			}
-			return api as {
-				promote: (
-					path: string,
-					requests: readonly PromoteRequest[],
-					expected: string,
-				) => Promise<readonly unknown[]>;
-			};
+			// Typed against the vendored public contract, so a change to Annoteca's
+			// promote signature or its PromoteRequest is caught here at build time
+			// rather than drifting. Runtime presence is still feature-detected above,
+			// because an older Annoteca that predates promote does not carry it.
+			return api as Pick<AnnotecaApi, 'promote'>;
 		} catch (err) {
 			console.error(err);
 			return null;
