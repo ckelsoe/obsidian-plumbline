@@ -1,18 +1,19 @@
-// Vendored from ckelsoe/obsidian-annoteca @ 1.17.0 (its published annoteca-api.d.ts).
-// Do not edit here. To update, re-copy the file from that repo. Plumbline consumes
-// Annoteca only through the runtime object this describes, resolved at call time.
+// Vendored from ckelsoe/obsidian-annoteca (its published annoteca-api.d.ts, tracking
+// main after 1.17.0). Do not edit here. To update, re-copy the file from that repo.
+// Plumbline consumes Annoteca only through the runtime object this describes, resolved
+// at call time, and only types its promote() call against it.
 //
-// Annoteca's public plugin API, as a standalone declaration.
+// Annoteca's public plugin API, as a standalone type declaration.
 //
-// This is the file another plugin copies to get types for Annoteca's API. It has
-// no imports and no runtime, so copying it adds no dependency on Annoteca: the
-// consumer still resolves the live object at call time and works when Annoteca is
-// absent. See INTEGRATING.md for the full guide.
+// OPTIONAL. Using the API needs nothing copied: it is a plain runtime object reached
+// at `app.plugins.getPlugin('annoteca')?.api`, callable in plain JS. This file only
+// gives TypeScript consumers the types, with no imports and no runtime, so copying it
+// adds no dependency. See API.md for the full guide.
 //
 // Resolve the API at CALL time, never in your onload. `app.plugins` is an Obsidian
 // internal the official types do not declare, so reach it through a minimal local
-// shape; INTEGRATING.md has a lookup that compiles against the stock types plus this
-// file alone. Gate on `apiVersion >= 3` and degrade below it.
+// shape; API.md has a lookup that compiles against the stock types plus this file
+// alone. Gate on `apiVersion >= 3` and degrade below it.
 //
 // Caching it is the only thing that makes plugin load order matter, and
 // `isEnabled('annoteca')` is not an availability test (it reports saved config, so
@@ -101,9 +102,6 @@ export interface AnnotecaApi {
 	// A capability floor to gate on. Feature-detect the exact method you call as
 	// well; unknown or lower than you need means degrade to unpaired behaviour.
 	readonly apiVersion: number;
-	// The generation of the exported assistant guidance (SKILL.md), NOT the marker
-	// format. Use it to tell which SKILL.md a build ships, not as a format gate.
-	readonly skillSchemaVersion: number;
 
 	// The categories a comment may be created in, in the user's own order, with
 	// their display names. Offer these rather than hardcoding a list that drifts
