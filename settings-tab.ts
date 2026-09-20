@@ -5,6 +5,7 @@ import {
 	SettingDefinitionItem,
 } from 'obsidian';
 import type PlumblinePlugin from './main';
+import { STARTER_GROUPS } from './engine/groups';
 
 // Community discussion for this plugin. This must stay a never-expiring
 // discord.gg invite. A discord.com/channels/... deep link only resolves for
@@ -18,12 +19,13 @@ const DISCORD_URL = 'https://discord.gg/gd6tKJDPj4';
 const RULE_KEY_PREFIX = 'rule:';
 const SPAN_KEY_PREFIX = 'span:';
 
-// Built-in writing profiles. Each selects which rule packs are active and how
-// they are tuned. The full cascade lives in the project's dev docs; only the
-// scripture profile is implemented today.
-const PROFILE_OPTIONS: Record<string, string> = {
-	'scripture-book': 'Scripture-first book',
-};
+// The built-in starter groups the dropdown offers, derived from the group data so
+// the labels never drift from the definitions. Each is a read-only example a
+// writer clones and tunes for their own work. See config-model.md.
+const PROFILE_OPTIONS: Record<string, string> = {};
+for (const group of STARTER_GROUPS) {
+	PROFILE_OPTIONS[group.id] = group.name;
+}
 
 // Turn a rule slug into a readable, sentence-case label ('reader-direction' ->
 // 'Reader direction') for the settings list.

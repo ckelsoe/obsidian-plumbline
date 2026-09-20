@@ -1,3 +1,4 @@
+<!-- slop-check: off (quotes the flagged vocabulary the plugin catches, such as leverage and utilize, as worked examples) -->
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -9,12 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Project scaffold from the standard template: build, CI, release, and scorecard tooling.
-- Settings tab with a writing-profile selector and the standard version and links footer.
+- Settings tab with a starter-group selector (Devotional nonfiction and Plain nonfiction) and the standard version and links footer.
+- Writing groups choose which checks run on a note. A group names the packs it draws from and tunes them, and the two starters ship read-only as worked examples to clone. The engine resolves a group into the same per-note config as before, so this is a foundation, not a behaviour change.
 - Engine groundwork: pure sentence-rhythm statistics (burstiness) with unit tests.
 - Engine core: the lint() contract plus the base protected-span pass, so code and headings no longer skew the prose metrics.
 - Live rhythm readout: the status bar shows the active note's burstiness as you type, and a command reports the full metrics.
 - Rules as data: the base pack's first mechanical rules flag AI-shaped phrasing over prose, skipping code and quotes, and the status bar shows the flag count for the active note.
-- Scripture pack: inline quoted verses with a citation are detected and protected, so no rule fires inside scripture, and a devotional-register rule is added for the scripture profile.
+- Scripture pack: inline quoted verses with a citation are detected and protected, so no rule fires inside scripture, and the scripture pack adds a devotional-register rule.
 - Inline diagnostics: flagged phrases are underlined in the editor, with the rule message on hover.
 - Findings panel: a side panel lists every flag in the active note, and clicking one jumps to it in the editor. Open it from the ribbon or the command palette.
 - More base rules: summative-closer and cinematic-opener, plus a longer flagged-vocabulary list.
@@ -29,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Structural rules over a new paragraph pass: transitional-stacking (a paragraph-initial "However,"), formatting-tells (consecutive bold-led paragraphs), emphasis-fragment (a whole-sentence fragment like "Full stop.").
 - Judgment-tier notes (suggestions): personal-claims-vague flags a first-person claim carrying no specific, and anchor-test flags an abstract sentence with no concrete particular.
 - AI disclosure: a command reads the active note's `provenance` frontmatter (cold, AI-edited, or AI-drafted) and reports the Amazon KDP disclosure it requires.
-- Rule toggles in settings: the settings tab lists every built-in rule for the active profile, both the mechanical phrase rules and the cross-sentence heuristics, each with an on/off switch, so the ruleset is visible and adjustable without hand-editing `.plumbline/config.json`. A toggle rewrites only the disabled list; the file is re-read first, so any hand-authored overrides, custom rules, or edits made since load are preserved.
+- Rule toggles in settings: the settings tab lists every built-in rule for the active group, both the mechanical phrase rules and the cross-sentence heuristics, each with an on/off switch, so the ruleset is visible and adjustable without hand-editing `.plumbline/config.json`. A toggle rewrites only the disabled list; the file is re-read first, so any hand-authored overrides, custom rules, or edits made since load are preserved.
 
 ### Added
 - The findings panel is organised by paragraph. Each paragraph you have flagged gets its own section with a one-line count, the rules worth acting on listed under it in order, and suggestions collapsed into a single row you can open. A rule that fired several times in a paragraph shows the count and expands to every place it fired, so you can step through them instead of only jumping to the first. Long lists cap at 25 rows with a button that says how many more there are.

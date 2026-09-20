@@ -51,6 +51,7 @@ import {
 	EMPTY_VAULT_CONFIG,
 	parseVaultConfig,
 } from './engine/vault-config';
+import { migrateGroupId } from './engine/groups';
 
 // One built-in rule (mechanical or heuristic), paired with whether the vault
 // config currently has it on. Drives the settings list so a rule can be toggled
@@ -65,8 +66,10 @@ interface SpanKindState extends SpanKindInfo {
 }
 
 export interface PlumblineSettings {
-	// The active profile selects which rule packs are on and how they are tuned.
-	// Profiles and the pack cascade are specified in the project's dev docs.
+	// The active group id selects which packs and checks are on and how they are
+	// tuned. Groups and the check library are specified in config-model.md. The
+	// field keeps the name activeProfile because the note-level selector is still
+	// spelled `plumbline-profile`; the value it holds is a group id.
 	activeProfile: string;
 	// Whether flagged phrases are underlined in the editor, and whether the
 	// underline yields to Annoteca's open comments. Interop-contract 5.1.
@@ -74,7 +77,7 @@ export interface PlumblineSettings {
 }
 
 export const DEFAULT_SETTINGS: PlumblineSettings = {
-	activeProfile: 'scripture-book',
+	activeProfile: 'devotional-nonfiction',
 	inlineUnderlines: DEFAULT_INLINE_UNDERLINES,
 };
 
@@ -249,9 +252,11 @@ export default class PlumblinePlugin extends Plugin {
 				? (stored as Record<string, unknown>)
 				: {};
 		this.settings = {
+			// A value stored under the pre-rename `scripture-book` id migrates to
+			// its current spelling, so the dropdown shows the right group selected.
 			activeProfile:
 				typeof record.activeProfile === 'string'
-					? record.activeProfile
+					? migrateGroupId(record.activeProfile)
 					: DEFAULT_SETTINGS.activeProfile,
 			inlineUnderlines: isInlineUnderlines(record.inlineUnderlines)
 				? record.inlineUnderlines
