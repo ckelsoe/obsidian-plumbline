@@ -5,7 +5,9 @@ import {
 	SettingDefinitionItem,
 } from 'obsidian';
 import type PlumblinePlugin from './main';
+import type { RuleState } from './main';
 import { STARTER_GROUPS } from './engine/groups';
+import type { Severity } from './engine/types';
 
 // Community discussion for this plugin. This must stay a never-expiring
 // discord.gg invite. A discord.com/channels/... deep link only resolves for
@@ -13,11 +15,13 @@ import { STARTER_GROUPS } from './engine/groups';
 // invite expires after 7 days and would rot in a shipped release.
 const DISCORD_URL = 'https://discord.gg/gd6tKJDPj4';
 
-// Control keys for the per-rule and per-comment toggles are namespaced so
-// getControlValue and setControlValue can route them to the vault config instead
-// of plugin settings.
-const RULE_KEY_PREFIX = 'rule:';
+// The comment-span toggles are keyed with this prefix so getControlValue and
+// setControlValue can route them to the vault config instead of plugin settings.
+// The rule rows are rendered imperatively (renderRuleRow) and write to the vault
+// config directly, so they need no such key. The roll-up control uses the plain
+// 'rollup' key, routed the same way.
 const SPAN_KEY_PREFIX = 'span:';
+const ROLLUP_KEY = 'rollup';
 
 // The built-in starter groups the dropdown offers, derived from the group data so
 // the labels never drift from the definitions. Each is a read-only example a
@@ -61,6 +65,30 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
+				heading: 'Volume',
+				items: [
+					{
+						name: 'Roll up a repeated check after',
+						desc: 'When one check fires more than this many times in a note, the findings list shows a single counted row instead of one row per hit. Below the threshold each hit stays its own row.',
+						control: {
+							type: 'dropdown',
+							key: ROLLUP_KEY,
+							options: {
+								'1': '1 hit',
+								'2': '2 hits',
+								'3': '3 hits',
+								'4': '4 hits',
+								'5': '5 hits',
+								'6': '6 hits',
+								'7': '7 hits',
+								'8': '8 hits',
+							},
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
 				heading: 'Inline marks',
 				items: [
 					{
@@ -95,10 +123,9 @@ export class PlumblineSettingTab extends PluginSettingTab {
 				heading: 'Active rules',
 				items: this.plugin.profileRuleStates().map((state) => ({
 					name: prettifySlug(state.slug),
-					desc: state.message,
-					control: {
-						type: 'toggle' as const,
-						key: `${RULE_KEY_PREFIX}${state.slug}`,
+					searchable: false,
+					render: (setting: Setting) => {
+						this.renderRuleRow(setting, state);
 					},
 				})),
 			},
@@ -115,17 +142,14 @@ export class PlumblineSettingTab extends PluginSettingTab {
 	// Binds declarative control definitions to their store. A `rule:` key reads
 	// from the vault config's disabled set; every other key is a plugin setting.
 	getControlValue(key: string): unknown {
-		if (key.startsWith(RULE_KEY_PREFIX)) {
-			const slug = key.slice(RULE_KEY_PREFIX.length);
-			return this.plugin
-				.profileRuleStates()
-				.some((state) => state.slug === slug && state.enabled);
-		}
 		if (key.startsWith(SPAN_KEY_PREFIX)) {
 			const kind = key.slice(SPAN_KEY_PREFIX.length);
 			return this.plugin
 				.commentSpanStates()
 				.some((state) => state.kind === kind && state.enabled);
+		}
+		if (key === ROLLUP_KEY) {
+			return String(this.plugin.currentRollupThreshold());
 		}
 		return (this.plugin.settings as unknown as Record<string, unknown>)[
 			key
@@ -133,14 +157,13 @@ export class PlumblineSettingTab extends PluginSettingTab {
 	}
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
-		if (key.startsWith(RULE_KEY_PREFIX)) {
-			const slug = key.slice(RULE_KEY_PREFIX.length);
-			await this.plugin.setRuleEnabled(slug, Boolean(value));
-			return;
-		}
 		if (key.startsWith(SPAN_KEY_PREFIX)) {
 			const kind = key.slice(SPAN_KEY_PREFIX.length);
 			await this.plugin.setSpanKindEnabled(kind, Boolean(value));
+			return;
+		}
+		if (key === ROLLUP_KEY) {
+			await this.plugin.setRollupThreshold(Number(value));
 			return;
 		}
 		(this.plugin.settings as unknown as Record<string, unknown>)[key] =
@@ -159,6 +182,32 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			// a setting that visibly does nothing reads as broken.
 			this.plugin.applyConfigChange();
 		}
+	}
+
+	// One rule row: name and message, a severity dropdown, and an on/off toggle,
+	// both writing straight to the vault config. Choosing a rule's own default
+	// severity clears the override rather than storing a no-op entry.
+	private renderRuleRow(setting: Setting, state: RuleState): void {
+		setting.setName(prettifySlug(state.slug)).setDesc(state.message);
+		setting.addDropdown((dropdown) => {
+			dropdown
+				.addOption('error', 'Error')
+				.addOption('warning', 'Warning')
+				.addOption('suggestion', 'Suggestion')
+				.setValue(state.severity)
+				.onChange((value) => {
+					const severity = value as Severity;
+					void this.plugin.setRuleSeverity(
+						state.slug,
+						severity === state.defaultSeverity ? null : severity,
+					);
+				});
+		});
+		setting.addToggle((toggle) => {
+			toggle.setValue(state.enabled).onChange((value) => {
+				void this.plugin.setRuleEnabled(state.slug, value);
+			});
+		});
 	}
 
 	// Renders the version + links footer into a trailing settings row. Each
