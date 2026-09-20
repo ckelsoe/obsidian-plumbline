@@ -29,7 +29,13 @@ import {
 	upsertEntry,
 } from './report-index';
 import { FindingsView, FINDINGS_VIEW_TYPE } from './findings-view';
-import { Diagnostic, LintResult, ResolvedConfig } from './engine/types';
+import {
+	Diagnostic,
+	LintResult,
+	ResolvedConfig,
+	Severity,
+} from './engine/types';
+import { DEFAULT_ROLLUP_THRESHOLD } from './engine/rollup';
 import { fileScope } from './engine/file-scope';
 import { lint } from './engine/lint';
 import { buildReport } from './report';
@@ -56,8 +62,13 @@ import { migrateGroupId } from './engine/groups';
 // One built-in rule (mechanical or heuristic), paired with whether the vault
 // config currently has it on. Drives the settings list so a rule can be toggled
 // without hand-editing JSON.
-interface RuleState extends RuleInfo {
+export interface RuleState extends RuleInfo {
 	enabled: boolean;
+	// `severity` (from RuleInfo) carries the EFFECTIVE severity, the vault
+	// override if there is one or the rule's default otherwise. `defaultSeverity`
+	// keeps the record's own value, so the settings tab can tell when a row is
+	// overridden and offer a reset to the default.
+	defaultSeverity: Severity;
 }
 
 // One toggleable comment span kind, paired with whether masking is currently on.
@@ -317,10 +328,20 @@ export default class PlumblinePlugin extends Plugin {
 	// tab renders this.
 	profileRuleStates(): RuleState[] {
 		const disabled = new Set(this.vaultConfig.disabledRules);
+		const overrides = this.vaultConfig.overrides;
 		return profileRuleInfos(this.settings.activeProfile).map((info) => ({
 			...info,
 			enabled: !disabled.has(info.slug),
+			defaultSeverity: info.severity,
+			severity: overrides[info.slug]?.severity ?? info.severity,
 		}));
+	}
+
+	// The roll-up threshold in effect: the vault override, or the built-in
+	// default. The settings tab shows this and lets the writer change it without
+	// hand-editing the config file.
+	currentRollupThreshold(): number {
+		return this.vaultConfig.rollupThreshold ?? DEFAULT_ROLLUP_THRESHOLD;
 	}
 
 	// Add or remove an id from a disabled list, returning the new array. The one
@@ -374,16 +395,56 @@ export default class PlumblinePlugin extends Plugin {
 		await this.persistToggle('disabledSpanKinds', kind, enabled);
 	}
 
-	// Read the current config, apply one toggle to the named disabled list, and
-	// write it back, preserving every other field. If the file exists but is not a
-	// JSON object (mid hand-edit, an array, or otherwise malformed), abort with a
-	// notice rather than overwrite and lose the author's content. The toggle is
-	// applied to the freshly read list, so a concurrent edit to the other list or
-	// to any other field survives. Never throws, so the save queue keeps draining.
-	private async writeToggle(
-		field: 'disabledRules' | 'disabledSpanKinds',
-		id: string,
-		enabled: boolean,
+	// Set or clear a rule's severity override in the vault config. Passing the
+	// rule's own default clears the override, so the file never accumulates a
+	// no-op entry; any other value writes it. Re-analyzes after, so the change
+	// shows in the editor, panel, and status bar at once.
+	async setRuleSeverity(
+		slug: string,
+		severity: Severity | null,
+	): Promise<void> {
+		this.saveQueue = this.saveQueue.then(() =>
+			this.writeConfig((raw, fresh) => {
+				const overrides = { ...fresh.overrides };
+				if (severity === null) {
+					const rest = { ...overrides[slug] };
+					delete rest.severity;
+					if (Object.keys(rest).length === 0) {
+						delete overrides[slug];
+					} else {
+						overrides[slug] = rest;
+					}
+				} else {
+					overrides[slug] = { ...overrides[slug], severity };
+				}
+				raw.overrides = overrides;
+			}),
+		);
+		await this.saveQueue;
+		this.applyConfigChange();
+	}
+
+	// Set the roll-up threshold in the vault config, then re-analyze. The value
+	// comes from a bounded settings control; a bad hand-edit is clamped on read.
+	async setRollupThreshold(threshold: number): Promise<void> {
+		this.saveQueue = this.saveQueue.then(() =>
+			this.writeConfig((raw) => {
+				raw.rollupThreshold = threshold;
+			}),
+		);
+		await this.saveQueue;
+		this.applyConfigChange();
+	}
+
+	// Safe read-modify-write for .plumbline/config.json. Reads the current file,
+	// aborting with a notice if it is not a JSON object (mid hand-edit, an array,
+	// or otherwise malformed) so the author's content is never overwritten, hands
+	// the raw object and its parsed form to `mutate`, then re-parses into
+	// vaultConfig and writes it back. Every field `mutate` leaves alone survives,
+	// so a concurrent edit elsewhere in the file is preserved. Never throws, so
+	// the save queue keeps draining.
+	private async writeConfig(
+		mutate: (raw: Record<string, unknown>, fresh: VaultConfig) => void,
 	): Promise<void> {
 		try {
 			const dir = '.plumbline';
@@ -416,17 +477,28 @@ export default class PlumblinePlugin extends Plugin {
 				await adapter.mkdir(dir);
 			}
 			const fresh = parseVaultConfig(raw);
-			const current =
-				field === 'disabledRules'
-					? fresh.disabledRules
-					: fresh.disabledSpanKinds;
-			raw[field] = PlumblinePlugin.toggledList(current, id, enabled);
+			mutate(raw, fresh);
 			this.vaultConfig = parseVaultConfig(raw);
 			await adapter.write(path, JSON.stringify(raw, null, 2));
 		} catch (err) {
 			console.error(err);
 			new Notice('Plumbline: could not save the config.');
 		}
+	}
+
+	// Toggle one id in a disabled list, applied to the freshly read list.
+	private async writeToggle(
+		field: 'disabledRules' | 'disabledSpanKinds',
+		id: string,
+		enabled: boolean,
+	): Promise<void> {
+		await this.writeConfig((raw, fresh) => {
+			const current =
+				field === 'disabledRules'
+					? fresh.disabledRules
+					: fresh.disabledSpanKinds;
+			raw[field] = PlumblinePlugin.toggledList(current, id, enabled);
+		});
 	}
 
 	// Re-run analysis everywhere after the active config changes (profile switch,
