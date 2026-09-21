@@ -137,4 +137,15 @@ export interface ResolvedConfig {
 	// Per-rule confidence overrides, slug to 0..1, from the vault config. A rule
 	// absent here uses its record's value, or the default for its kind.
 	confidenceBySlug: Record<string, number>;
+	// Heuristic severity overrides, slug to Severity. A mechanical rule carries its
+	// resolved severity in `rules` (a group copies the record with the new value),
+	// but the cross-sentence heuristics run separately, so their per-group override
+	// is resolved here and applied by the heuristic pass. See config-model.md,
+	// per-membership tuning.
+	severityBySlug: Record<string, Severity>;
+	// Per-check roll-up overrides, slug to a threshold. A rule absent here uses
+	// `rollupThreshold`; a noisy check can collapse to one row sooner. Roll-up
+	// defaults on the group and a membership overrides it, the reverse of severity
+	// and confidence (config-model.md).
+	rollupBySlug: Record<string, number>;
 }

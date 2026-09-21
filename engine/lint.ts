@@ -46,7 +46,12 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 		? []
 		: [
 				...applyRules(prose, rules),
-				...applyHeuristics(prose, sentences, disabled),
+				...applyHeuristics(
+					prose,
+					sentences,
+					disabled,
+					config.severityBySlug,
+				),
 			];
 	diagnostics.sort((a, b) => a.start - b.start || a.end - b.end);
 	// Keyed once, here, so the hover, the panel, the report and a promoted

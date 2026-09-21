@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `.plumbline/` folder gains an `index.json` listing every report that has been written, with the note it belongs to, its profile, and how many findings it had. A collaborator working on the filesystem reads one file instead of walking the vault and guessing which JSON goes with which note. Report files are also named so two notes can no longer collide: `a/b.md` and `a-b.md` previously produced the same filename, and the second report written silently replaced the first.
 
 ### Fixed
+- A severity you set on a cross-sentence heuristic (like anaphora or emphasis fragment) now takes effect. Before, the dropdown saved the choice but the linter kept flagging at the built-in severity, so the setting looked broken. The per-check roll-up threshold is now honored the same way, so one noisy check can collapse to a single row sooner than the rest of its group.
 - The squiggle under a flagged phrase was invisible. Every CSS property was set correctly, but both halves of the wave were drawn in the same 6px cell, so they crossed into an X and the coloured band worked out about two thirds of a pixel wide, which anti-aliases to nothing. Offsetting the second half by half a cell makes the two diagonals alternate into a continuous wave, and widening the band makes it survive a normal-resolution screen. Flagged words now carry a visible coloured squiggle, the way a spell checker marks a misspelling.
 
 ### Changed

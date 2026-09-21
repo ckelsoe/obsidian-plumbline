@@ -375,10 +375,14 @@ export function heuristicConfidence(slug: string): number | undefined {
 // Run the cross-sentence heuristics over the masked prose. Offsets map back onto
 // the source, the same as the mechanical rules. A heuristic whose slug is in
 // `disabled` is skipped, so it can be toggled from the vault config like any rule.
+// A slug in `severityBySlug` fires at the overridden severity instead of the
+// record's default: a mechanical rule carries its group-tuned severity on a copied
+// record, but a heuristic is resolved here, so its override is applied at this point.
 export function applyHeuristics(
 	text: string,
 	sentences: SentenceSpan[],
 	disabled: Set<string> = new Set(),
+	severityBySlug: Record<string, Severity> = {},
 ): Diagnostic[] {
 	const diagnostics: Diagnostic[] = [];
 	const paragraphs = splitParagraphsWithOffsets(text);
@@ -386,11 +390,12 @@ export function applyHeuristics(
 		if (disabled.has(rule.slug)) {
 			continue;
 		}
+		const severity = severityBySlug[rule.slug] ?? rule.severity;
 		for (const range of rule.run(text, sentences, paragraphs)) {
 			if (range.end > range.start) {
 				diagnostics.push({
 					ruleSlug: rule.slug,
-					severity: rule.severity,
+					severity,
 					start: range.start,
 					end: range.end,
 					message: rule.message,

@@ -110,6 +110,21 @@ export function resolveConfig(
 		disabledSlugs = [...base.disabledSlugs, ...vaultConfig.disabledRules];
 	}
 
+	// A heuristic's severity override from the flat vault config lands in
+	// severityBySlug, because mergeRules only retunes the mechanical rule list; a
+	// heuristic is not in `rules`, so its stored override would otherwise never
+	// take effect. A mechanical override is already baked into `rules` above, so it
+	// is not copied here (that would be a dead entry the engine ignores anyway).
+	const heuristicSlugs = new Set(HEURISTIC_RULES.map((r) => r.slug));
+	const severityBySlug: Record<string, Severity> = { ...base.severityBySlug };
+	if (vaultConfig) {
+		for (const [slug, override] of Object.entries(vaultConfig.overrides)) {
+			if (override.severity && heuristicSlugs.has(slug)) {
+				severityBySlug[slug] = override.severity;
+			}
+		}
+	}
+
 	return {
 		profileId: group.id,
 		protectedSpanKinds,
@@ -120,5 +135,9 @@ export function resolveConfig(
 			...base.confidenceBySlug,
 			...(vaultConfig?.confidence ?? {}),
 		},
+		severityBySlug,
+		// The flat vault config has no per-check roll-up layer; that override lives
+		// on the group membership only, so the group's map passes straight through.
+		rollupBySlug: base.rollupBySlug,
 	};
 }

@@ -46,6 +46,8 @@ describe('resolveGroup: devotional nonfiction', () => {
 		expect(resolved.protectedSpanKinds).toContain('scripture');
 		expect(resolved.disabledSlugs).toEqual([]);
 		expect(resolved.confidenceBySlug).toEqual({});
+		expect(resolved.severityBySlug).toEqual({});
+		expect(resolved.rollupBySlug).toEqual({});
 		expect(resolved.rollupThreshold).toBe(4);
 		expect(resolved.profileId).toBe(DEVOTIONAL_NONFICTION_ID);
 	});
@@ -123,6 +125,69 @@ describe('resolveGroup: per-membership tuning', () => {
 	it('clamps a bad rollup threshold to the default', () => {
 		const tuned: GroupDefinition = { ...plain, rollupThreshold: 0 };
 		expect(resolveGroup(tuned).rollupThreshold).toBe(4);
+	});
+
+	it('carries a heuristic severity override in severityBySlug, not in rules', () => {
+		const tuned: GroupDefinition = {
+			...plain,
+			checks: { 'emphasis-fragment': { severity: 'warning' } },
+		};
+		const resolved = resolveGroup(tuned);
+		expect(resolved.severityBySlug['emphasis-fragment']).toBe('warning');
+		// A heuristic is never in the mechanical rule list, override or not.
+		expect(resolved.rules.some((r) => r.slug === 'emphasis-fragment')).toBe(
+			false,
+		);
+	});
+
+	it('keeps a mechanical severity override out of severityBySlug', () => {
+		const tuned: GroupDefinition = {
+			...plain,
+			checks: { 'reader-direction': { severity: 'error' } },
+		};
+		const resolved = resolveGroup(tuned);
+		// Mechanical severity rides on the copied rule record, so severityBySlug
+		// stays empty and the engine has one place to read it from.
+		expect(resolved.severityBySlug).toEqual({});
+	});
+
+	it('carries a per-check roll-up override for a mechanical and a heuristic check', () => {
+		const tuned: GroupDefinition = {
+			...plain,
+			checks: {
+				'reader-direction': { rollup: 2 },
+				'emphasis-fragment': { rollup: 6 },
+			},
+		};
+		const resolved = resolveGroup(tuned);
+		expect(resolved.rollupBySlug['reader-direction']).toBe(2);
+		expect(resolved.rollupBySlug['emphasis-fragment']).toBe(6);
+	});
+
+	it('drops a bad per-check roll-up so the check falls back to the group threshold', () => {
+		const tuned: GroupDefinition = {
+			...plain,
+			checks: { 'reader-direction': { rollup: 0 } },
+		};
+		expect(resolveGroup(tuned).rollupBySlug).toEqual({});
+	});
+
+	it('records no overrides for a disabled check', () => {
+		const tuned: GroupDefinition = {
+			...plain,
+			checks: {
+				'reader-direction': {
+					enabled: false,
+					severity: 'error',
+					confidence: 0.2,
+					rollup: 2,
+				},
+			},
+		};
+		const resolved = resolveGroup(tuned);
+		expect(resolved.disabledSlugs).toContain('reader-direction');
+		expect(resolved.confidenceBySlug).toEqual({});
+		expect(resolved.rollupBySlug).toEqual({});
 	});
 });
 

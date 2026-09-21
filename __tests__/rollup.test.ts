@@ -20,9 +20,13 @@ const hit = (
 	message: `${slug} message`,
 });
 
-const config = (rollupThreshold = DEFAULT_ROLLUP_THRESHOLD) => ({
+const config = (
+	rollupThreshold = DEFAULT_ROLLUP_THRESHOLD,
+	rollupBySlug: Record<string, number> = {},
+) => ({
 	rollupThreshold,
 	confidenceBySlug: {},
+	rollupBySlug,
 });
 
 const flat = () => CONFIDENCE.mechanical;
@@ -67,6 +71,26 @@ describe('rollup: grouping', () => {
 		const hits = [0, 10].map((n) => hit('a', n));
 		expect(rollup(TEXT, hits, config(1), flat)[0]?.rolledUp).toBe(true);
 		expect(rollup(TEXT, hits, config(9), flat)[0]?.rolledUp).toBe(false);
+	});
+
+	// A noisy check can collapse sooner than the group default; another check in
+	// the same note keeps the group threshold.
+	it('honours a per-check threshold override', () => {
+		const hits = [
+			...[0, 10, 20].map((n) => hit('noisy', n)),
+			...[30, 40].map((n) => hit('calm', n)),
+		];
+		const out = rollup(TEXT, hits, config(4, { noisy: 2 }), flat);
+		expect(out.find((f) => f.ruleSlug === 'noisy')?.rolledUp).toBe(true);
+		expect(out.find((f) => f.ruleSlug === 'calm')?.rolledUp).toBe(false);
+	});
+
+	// The per-check override is floored at 1 like the group threshold, so a bad
+	// value never rolls up a lone hit.
+	it('floors a per-check override at 1', () => {
+		expect(
+			rollup(TEXT, [hit('a', 0)], config(4, { a: 0 }), flat)[0]?.rolledUp,
+		).toBe(false);
 	});
 
 	// A threshold under 1 would roll up a single hit, which reads worse than the
