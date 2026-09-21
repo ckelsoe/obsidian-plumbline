@@ -1,5 +1,6 @@
 import { lint } from '../engine/lint';
 import { resolveConfig } from '../engine/config';
+import { resolveGroup, starterGroup } from '../engine/groups';
 
 const config = resolveConfig('scripture-book');
 
@@ -215,5 +216,49 @@ describe('lint per-file scoping', () => {
 		).metrics;
 		expect(scoped.words).toBe(plain.words);
 		expect(scoped.sentences).toBe(plain.sentences);
+	});
+});
+
+// Per-membership tuning resolved end to end. A heuristic severity override and a
+// per-check roll-up override are the two knobs slice 3 of the groups build wired
+// through; these drive them through lint() so a stored value that never took
+// effect (heuristic severity) cannot regress silently.
+describe('lint per-membership tuning', () => {
+	const ANAPHORA = 'The Lord is near. The Lord is kind.';
+
+	it('applies a heuristic severity override from the flat vault config', () => {
+		const anaphoraOf = (cfg: ReturnType<typeof resolveConfig>) =>
+			lint(ANAPHORA, cfg).diagnostics.find(
+				(d) => d.ruleSlug === 'anaphora',
+			);
+		// Baseline: anaphora is a suggestion, so the override is a real change.
+		expect(anaphoraOf(config)?.severity).toBe('suggestion');
+		const raised = resolveConfig('scripture-book', {
+			disabledRules: [],
+			disabledSpanKinds: [],
+			rules: [],
+			overrides: { anaphora: { severity: 'error' } },
+		});
+		expect(anaphoraOf(raised)?.severity).toBe('error');
+	});
+
+	it('rolls up one check sooner from a per-check group override', () => {
+		const base = starterGroup('devotional-nonfiction');
+		if (!base) {
+			throw new Error('missing devotional starter');
+		}
+		const text = 'Read that again. Read that again. Read that again.';
+		const readerFinding = (rollup?: number) => {
+			const group = rollup
+				? { ...base, checks: { 'reader-direction': { rollup } } }
+				: base;
+			return lint(text, resolveGroup(group)).findings.find(
+				(f) => f.ruleSlug === 'reader-direction',
+			);
+		};
+		// Three hits sit under the default threshold of 4, so nothing rolls up.
+		expect(readerFinding()?.rolledUp).toBe(false);
+		// A per-check override of 2 collapses the same three hits to one row.
+		expect(readerFinding(2)?.rolledUp).toBe(true);
 	});
 });

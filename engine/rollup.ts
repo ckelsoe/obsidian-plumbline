@@ -86,7 +86,10 @@ export function priorityOf(
 export function rollup(
 	text: string,
 	diagnostics: readonly Diagnostic[],
-	config: Pick<ResolvedConfig, 'rollupThreshold' | 'confidenceBySlug'>,
+	config: Pick<
+		ResolvedConfig,
+		'rollupThreshold' | 'confidenceBySlug' | 'rollupBySlug'
+	>,
 	confidenceOf: (slug: string) => number,
 ): Finding[] {
 	const bySlug = new Map<string, Diagnostic[]>();
@@ -99,9 +102,14 @@ export function rollup(
 		}
 	}
 
-	// A threshold below 1 would roll up a single hit, which reads as "1 finding
-	// in this chapter" where the hit itself would have been clearer.
-	const threshold = Math.max(1, Math.floor(config.rollupThreshold));
+	// A check's threshold is its own override, or the group default. A value below
+	// 1 would roll up a single hit, which reads as "1 finding in this chapter"
+	// where the hit itself would have been clearer, so both are floored at 1.
+	const thresholdFor = (slug: string): number =>
+		Math.max(
+			1,
+			Math.floor(config.rollupBySlug[slug] ?? config.rollupThreshold),
+		);
 
 	const findings: Finding[] = [];
 	for (const [slug, hits] of bySlug) {
@@ -109,6 +117,7 @@ export function rollup(
 		if (first === undefined) {
 			continue;
 		}
+		const threshold = thresholdFor(slug);
 		// Keyless here; withKeys() fills them in below, once every finding for the
 		// note exists. The occurrence index it hashes is note-scoped, so it cannot
 		// be assigned one finding at a time.

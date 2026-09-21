@@ -22,14 +22,16 @@ import { DEFAULT_ROLLUP_THRESHOLD } from './rollup';
 // the membership turns it off.
 export interface CheckMembership {
 	enabled?: boolean;
-	// Overrides the check's default severity. Applied to mechanical rules here;
-	// heuristic severity override is a later phase (it changes the calibrated
-	// ranking), so a membership severity on a heuristic slug is ignored for now.
+	// Overrides the check's default severity, for a mechanical rule (baked into the
+	// copied rule record) or a heuristic (carried in ResolvedConfig.severityBySlug
+	// and applied by the heuristic pass). Both resolve here.
 	severity?: Severity;
 	// Overrides the check's default confidence, 0..1. Clamped on read.
 	confidence?: number;
-	// Per-check roll-up override is a later phase; the calibrated roll-up is not
-	// tuned per check yet, so this field is reserved and not read.
+	// Overrides the group's roll-up threshold for this one check, so a noisy check
+	// can collapse to one row sooner than the rest. An integer of at least 1;
+	// clamped on read. Roll-up is the one knob whose default lives on the group and
+	// whose override lives on the membership (config-model.md).
 	rollup?: number;
 }
 
@@ -164,6 +166,17 @@ function clampThreshold(value: number): number {
 	return Math.floor(value);
 }
 
+// A per-check roll-up override: a finite integer of at least 1, or undefined to
+// leave the check on the group threshold. Unlike clampThreshold, an out-of-range
+// value is dropped rather than replaced with the default, because "no usable
+// override" should fall through to the group threshold, not to a fixed number.
+function clampCheckRollup(value: number | undefined): number | undefined {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+		return undefined;
+	}
+	return Math.floor(value);
+}
+
 // Resolve a group definition into the per-document ResolvedConfig the engine
 // consumes. Mechanical rules come from the extended packs, filtered and retuned by
 // the membership map. Heuristics apply to every group; a membership can disable
@@ -176,10 +189,23 @@ export function resolveGroup(group: GroupDefinition): ResolvedConfig {
 
 	const disabledSlugs: string[] = [];
 	const confidenceBySlug: Record<string, number> = {};
+	const severityBySlug: Record<string, Severity> = {};
+	const rollupBySlug: Record<string, number> = {};
+
+	// A check's roll-up override, recorded for both mechanical and heuristic slugs
+	// since roll-up groups by slug regardless of how the rule decides.
+	const recordRollup = (slug: string, membership?: CheckMembership): void => {
+		const rollup = clampCheckRollup(membership?.rollup);
+		if (rollup !== undefined) {
+			rollupBySlug[slug] = rollup;
+		}
+	};
 
 	// Heuristics first: on for every group unless a membership disables them. A
-	// disabled check does not run, so its confidence override is not recorded,
-	// matching the mechanical branch below.
+	// disabled check does not run, so its overrides are not recorded, matching the
+	// mechanical branch below. A heuristic's severity override lands in
+	// severityBySlug, because heuristics are not in `rules` and so cannot carry it
+	// on a copied record the way a mechanical rule does.
 	for (const slug of HEURISTIC_SLUGS) {
 		const membership = group.checks[slug];
 		if (membership?.enabled === false) {
@@ -189,6 +215,10 @@ export function resolveGroup(group: GroupDefinition): ResolvedConfig {
 		if (typeof membership?.confidence === 'number') {
 			confidenceBySlug[slug] = clampConfidence(membership.confidence);
 		}
+		if (membership?.severity) {
+			severityBySlug[slug] = membership.severity;
+		}
+		recordRollup(slug, membership);
 	}
 
 	const rules: Rule[] = [];
@@ -203,6 +233,7 @@ export function resolveGroup(group: GroupDefinition): ResolvedConfig {
 				membership.confidence,
 			);
 		}
+		recordRollup(rule.slug, membership);
 		// A severity override produces a copy so the shared pack record is never
 		// mutated; every other case keeps the original reference.
 		rules.push(
@@ -219,5 +250,7 @@ export function resolveGroup(group: GroupDefinition): ResolvedConfig {
 		disabledSlugs,
 		rollupThreshold: clampThreshold(group.rollupThreshold),
 		confidenceBySlug,
+		severityBySlug,
+		rollupBySlug,
 	};
 }
