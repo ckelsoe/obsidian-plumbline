@@ -191,6 +191,69 @@ describe('resolveGroup: per-membership tuning', () => {
 	});
 });
 
+describe('resolveGroup: custom checks default off', () => {
+	const customRule = {
+		slug: 'corporate-jargon',
+		packId: 'custom',
+		category: 'custom',
+		severity: 'suggestion' as const,
+		message: 'Say it plainly.',
+		phrases: ['circle back'],
+	};
+
+	it('leaves a custom check out when no membership enables it', () => {
+		const resolved = resolveGroup(plain, [customRule]);
+		expect(resolved.rules.some((r) => r.slug === 'corporate-jargon')).toBe(
+			false,
+		);
+		// Not "disabled", just not in this group, so it never lands in disabledSlugs.
+		expect(resolved.disabledSlugs).not.toContain('corporate-jargon');
+	});
+
+	it('includes a custom check only when its membership is enabled', () => {
+		const tuned: GroupDefinition = {
+			...plain,
+			checks: { 'corporate-jargon': { enabled: true } },
+		};
+		const resolved = resolveGroup(tuned, [customRule]);
+		expect(resolved.rules.some((r) => r.slug === 'corporate-jargon')).toBe(
+			true,
+		);
+	});
+
+	it('applies membership tuning to an enabled custom check without mutating the source', () => {
+		const tuned: GroupDefinition = {
+			...plain,
+			checks: {
+				'corporate-jargon': {
+					enabled: true,
+					severity: 'warning',
+					confidence: 0.4,
+					rollup: 2,
+				},
+			},
+		};
+		const resolved = resolveGroup(tuned, [customRule]);
+		const rule = resolved.rules.find((r) => r.slug === 'corporate-jargon');
+		expect(rule?.severity).toBe('warning');
+		expect(customRule.severity).toBe('suggestion');
+		expect(resolved.confidenceBySlug['corporate-jargon']).toBe(0.4);
+		expect(resolved.rollupBySlug['corporate-jargon']).toBe(2);
+	});
+
+	it('treats enabled:false the same as absent for a custom check', () => {
+		const tuned: GroupDefinition = {
+			...plain,
+			checks: { 'corporate-jargon': { enabled: false } },
+		};
+		const resolved = resolveGroup(tuned, [customRule]);
+		expect(resolved.rules.some((r) => r.slug === 'corporate-jargon')).toBe(
+			false,
+		);
+		expect(resolved.disabledSlugs).not.toContain('corporate-jargon');
+	});
+});
+
 describe('legacy id migration', () => {
 	it('maps the old scripture-book id to the devotional group', () => {
 		expect(starterGroup('scripture-book')?.id).toBe(

@@ -23,6 +23,25 @@
 	color: var(--text-faint);
 }
 
+/* A stacked settings row: the title and description sit on top and a full-width
+   control (the custom-check phrases textarea) sits below, so a multi-line control
+   is usable in a narrow settings sidebar rather than crushed into the right column. */
+.setting-item.plumbline-stacked-row {
+	display: block;
+}
+
+.setting-item.plumbline-stacked-row .setting-item-control {
+	justify-content: flex-start;
+	padding-top: var(--size-4-2);
+}
+
+.setting-item.plumbline-stacked-row textarea {
+	width: 100%;
+	min-height: 6em;
+	resize: vertical;
+	font-family: var(--font-monospace);
+}
+
 .plumbline-findings-empty {
 	color: var(--text-muted);
 }
@@ -277,7 +296,8 @@
    property each instead of restating the whole stack. */
 .plumbline-mark {
 	--plumbline-squiggle: var(--text-accent);
-	background-image: linear-gradient(
+	background-image:
+		linear-gradient(
 			45deg,
 			transparent 40%,
 			var(--plumbline-squiggle) 40%,

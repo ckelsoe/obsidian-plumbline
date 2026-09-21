@@ -181,9 +181,14 @@ function clampCheckRollup(value: number | undefined): number | undefined {
 // consumes. Mechanical rules come from the extended packs, filtered and retuned by
 // the membership map. Heuristics apply to every group; a membership can disable
 // one (it lands in disabledSlugs, which the heuristic pass consults) or retune its
-// confidence. A group with an empty membership map resolves to the packs at their
-// defaults.
-export function resolveGroup(group: GroupDefinition): ResolvedConfig {
+// confidence. Custom checks (`customChecks`) are the user's library entries; unlike
+// pack checks they default OFF and are included only when a membership enables
+// them. A group with an empty membership map resolves to the packs at their
+// defaults, no custom checks. See config-model.md, "Per-membership tuning".
+export function resolveGroup(
+	group: GroupDefinition,
+	customChecks: readonly Rule[] = [],
+): ResolvedConfig {
 	const protectedSpanKinds = groupSpanKinds(group);
 	const mechanical = groupPackRules(group);
 
@@ -201,6 +206,18 @@ export function resolveGroup(group: GroupDefinition): ResolvedConfig {
 		}
 	};
 
+	// Record the confidence and roll-up overrides for an enabled check, shared by
+	// the heuristic, pack, and custom branches so the three cannot drift.
+	const recordEnabledOverrides = (
+		slug: string,
+		membership?: CheckMembership,
+	): void => {
+		if (typeof membership?.confidence === 'number') {
+			confidenceBySlug[slug] = clampConfidence(membership.confidence);
+		}
+		recordRollup(slug, membership);
+	};
+
 	// Heuristics first: on for every group unless a membership disables them. A
 	// disabled check does not run, so its overrides are not recorded, matching the
 	// mechanical branch below. A heuristic's severity override lands in
@@ -212,32 +229,43 @@ export function resolveGroup(group: GroupDefinition): ResolvedConfig {
 			disabledSlugs.push(slug);
 			continue;
 		}
-		if (typeof membership?.confidence === 'number') {
-			confidenceBySlug[slug] = clampConfidence(membership.confidence);
-		}
+		recordEnabledOverrides(slug, membership);
 		if (membership?.severity) {
 			severityBySlug[slug] = membership.severity;
 		}
-		recordRollup(slug, membership);
 	}
 
 	const rules: Rule[] = [];
+
+	// Pack mechanical rules: on unless a membership turns them off.
 	for (const rule of mechanical) {
 		const membership = group.checks[rule.slug];
 		if (membership?.enabled === false) {
 			disabledSlugs.push(rule.slug);
 			continue;
 		}
-		if (typeof membership?.confidence === 'number') {
-			confidenceBySlug[rule.slug] = clampConfidence(
-				membership.confidence,
-			);
-		}
-		recordRollup(rule.slug, membership);
+		recordEnabledOverrides(rule.slug, membership);
 		// A severity override produces a copy so the shared pack record is never
 		// mutated; every other case keeps the original reference.
 		rules.push(
 			membership?.severity
+				? { ...rule, severity: membership.severity }
+				: rule,
+		);
+	}
+
+	// Custom checks: OFF by default, so a check is included only when a membership
+	// enables it. An absent or not-true `enabled` is not "disabled", it is "not in
+	// this group", so it never lands in disabledSlugs. When on, it retunes exactly
+	// like a pack mechanical rule, since a custom check matches phrases the same way.
+	for (const rule of customChecks) {
+		const membership = group.checks[rule.slug];
+		if (membership?.enabled !== true) {
+			continue;
+		}
+		recordEnabledOverrides(rule.slug, membership);
+		rules.push(
+			membership.severity
 				? { ...rule, severity: membership.severity }
 				: rule,
 		);

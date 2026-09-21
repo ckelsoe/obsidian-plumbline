@@ -47,10 +47,22 @@ import { CorpusService } from './corpus-service';
 import {
 	COMMENT_SPAN_KINDS,
 	SpanKindInfo,
-	profileRuleInfos,
-	RuleInfo,
+	CheckDescriptor,
+	groupCheckDescriptors,
+	describeCheck,
+	isCheckEnabledInGroup,
+	prettifySlug,
 	resolveConfig,
 } from './engine/config';
+import {
+	CustomCheck,
+	USER_CHECKS_PATH,
+	CUSTOM_PACK_ID,
+	isBuiltInSlug,
+	parseUserChecks,
+	serializeUserChecks,
+	findCustomCheck,
+} from './engine/check-store';
 import {
 	VaultConfig,
 	EMPTY_VAULT_CONFIG,
@@ -67,23 +79,41 @@ import {
 	parseUserGroups,
 	serializeUserGroups,
 	findGroup,
+	allGroups,
 	hasFlatTuning,
 	buildMigratedGroup,
 } from './engine/group-store';
-import { BASE_PACK_ID } from './engine/packs';
-import { SCRIPTURE_PACK_ID } from './engine/scripture';
+import { BASE_PACK_ID, BASE_RULES } from './engine/packs';
+import { SCRIPTURE_PACK_ID, SCRIPTURE_RULES } from './engine/scripture';
 import { DEFAULT_ROLLUP_THRESHOLD } from './engine/rollup';
 
-// One built-in rule (mechanical or heuristic), paired with the active group's
-// tuning for it. Drives the settings list so a rule can be toggled and retuned
-// without hand-editing JSON.
-export interface RuleState extends RuleInfo {
+// One check as the settings tab shows it, resolved against the active group: its
+// identity, whether it is on, and the tuning knobs both at their check default and
+// as the group's membership overrides them. Drives the active-rules list, the
+// library picker, and the check editor, so a check can be composed and retuned
+// without hand-editing JSON. See config-model.md, per-membership tuning.
+export interface CheckState {
+	slug: string;
+	// Editable display name for a custom check; undefined for a built-in, whose
+	// label the settings tab derives from the slug.
+	name?: string;
+	packId: string;
+	category: string;
+	message: string;
+	isHeuristic: boolean;
+	isCustom: boolean;
 	enabled: boolean;
-	// `severity` (from RuleInfo) carries the EFFECTIVE severity: the active group's
-	// membership override if there is one, or the rule's default otherwise.
-	// `defaultSeverity` keeps the record's own value, so the settings tab can tell
-	// when a row is overridden and offer a reset to the default.
+	// Severity: the check's own default, the group override (null when inheriting),
+	// and the effective value the two resolve to.
 	defaultSeverity: Severity;
+	overrideSeverity: Severity | null;
+	effectiveSeverity: Severity;
+	// Confidence: the check's default (from its tier) and the group override, 0..1.
+	defaultConfidence: number;
+	overrideConfidence: number | null;
+	// Roll-up: the group's threshold and this check's per-membership override.
+	groupRollupThreshold: number;
+	overrideRollup: number | null;
 }
 
 // One toggleable comment span kind, paired with whether masking is currently on.
@@ -131,6 +161,11 @@ export default class PlumblinePlugin extends Plugin {
 	// starters live in code; these are the editable ones. The active group is one
 	// of the starters or one of these. See config-model.md, "What lives where".
 	private userGroups: GroupDefinition[] = [];
+	// The user's custom checks, loaded from .plumbline/checks.json. Built-in checks
+	// ship in the packs (code); these are the editable, deletable library entries.
+	// A group turns a custom check on per membership (default off). See
+	// config-model.md, "Built-in checks versus custom checks".
+	private userChecks: CustomCheck[] = [];
 	// Serializes config writes so two quick toggles cannot interleave their
 	// read-modify-write of the file and drop one.
 	private saveQueue: Promise<void> = Promise.resolve();
@@ -145,6 +180,7 @@ export default class PlumblinePlugin extends Plugin {
 		await this.loadSettings();
 		await this.loadVaultConfig();
 		await this.loadUserGroups();
+		await this.loadUserChecks();
 		await this.migrateFlatTuning();
 		this.statusBar = this.addStatusBarItem();
 		this.addSettingTab(new PlumblineSettingTab(this.app, this));
@@ -318,7 +354,12 @@ export default class PlumblinePlugin extends Plugin {
 		const profile =
 			(text !== undefined ? fileScope(text).profileId : undefined) ??
 			this.settings.activeProfile;
-		return resolveConfig(profile, this.vaultConfig, this.userGroups);
+		return resolveConfig(
+			profile,
+			this.vaultConfig,
+			this.userGroups,
+			this.userChecks,
+		);
 	}
 
 	private async loadVaultConfig(): Promise<void> {
@@ -341,6 +382,7 @@ export default class PlumblinePlugin extends Plugin {
 	private async reloadVaultConfig(): Promise<void> {
 		await this.loadVaultConfig();
 		await this.loadUserGroups();
+		await this.loadUserChecks();
 		this.applyConfigChange();
 		new Notice('Plumbline: reloaded config.');
 	}
@@ -631,25 +673,89 @@ export default class PlumblinePlugin extends Plugin {
 		});
 	}
 
-	// The built-in rules for the active group, mechanical and heuristic, each paired
-	// with the group's per-check tuning: whether it is on and its effective
-	// severity (the membership override, or the check's default). The settings tab
-	// renders this. Reads the active group's membership, not the flat vault config,
-	// since the group is where tuning lives now.
-	profileRuleStates(): RuleState[] {
+	// One check descriptor resolved against a group into the CheckState the settings
+	// tab renders: whether it is on in that group, and each tuning knob at its check
+	// default plus the group's membership override. The one place the descriptor to
+	// state mapping lives, shared by the active-rules list, the library, the editor,
+	// and the migration display.
+	private toCheckState(
+		descriptor: CheckDescriptor,
+		group: GroupDefinition,
+	): CheckState {
+		const membership = group.checks[descriptor.slug];
+		const overrideSeverity = membership?.severity ?? null;
+		const overrideConfidence =
+			typeof membership?.confidence === 'number'
+				? membership.confidence
+				: null;
+		const overrideRollup =
+			typeof membership?.rollup === 'number' ? membership.rollup : null;
+		return {
+			slug: descriptor.slug,
+			name: descriptor.name,
+			packId: descriptor.packId,
+			category: descriptor.category,
+			message: descriptor.message,
+			isHeuristic: descriptor.isHeuristic,
+			isCustom: descriptor.isCustom,
+			enabled: isCheckEnabledInGroup(group, descriptor),
+			defaultSeverity: descriptor.defaultSeverity,
+			overrideSeverity,
+			effectiveSeverity: overrideSeverity ?? descriptor.defaultSeverity,
+			defaultConfidence: descriptor.defaultConfidence,
+			overrideConfidence,
+			groupRollupThreshold: group.rollupThreshold,
+			overrideRollup,
+		};
+	}
+
+	// The checks shown in the active group's "Active rules" list: every built-in
+	// pack and heuristic check (on or off, so the ruleset is visible and toggleable)
+	// plus the custom checks the group has enabled. An off custom check is not an
+	// active rule; it lives in the library until turned on.
+	activeCheckStates(): CheckState[] {
 		const group = this.activeGroup();
-		return profileRuleInfos(
-			this.settings.activeProfile,
-			this.userGroups,
-		).map((info) => {
-			const membership = group.checks[info.slug];
-			return {
-				...info,
-				enabled: membership?.enabled !== false,
-				defaultSeverity: info.severity,
-				severity: membership?.severity ?? info.severity,
-			};
-		});
+		return groupCheckDescriptors(group, this.userChecks)
+			.filter(
+				(descriptor) =>
+					!descriptor.isCustom ||
+					isCheckEnabledInGroup(group, descriptor),
+			)
+			.map((descriptor) => this.toCheckState(descriptor, group));
+	}
+
+	// Every check available to the active group for the library picker: the pack
+	// checks it draws from and all custom checks, each with its on/off state so a
+	// tick can add or remove it. Off custom checks are included, unlike the
+	// active-rules list.
+	libraryCheckStates(): CheckState[] {
+		const group = this.activeGroup();
+		return groupCheckDescriptors(group, this.userChecks).map((descriptor) =>
+			this.toCheckState(descriptor, group),
+		);
+	}
+
+	// One check's state for the check editor, or undefined if the slug resolves to
+	// nothing (a custom check deleted while its editor was open).
+	checkState(slug: string): CheckState | undefined {
+		const descriptor = describeCheck(slug, this.userChecks);
+		if (!descriptor) {
+			return undefined;
+		}
+		return this.toCheckState(descriptor, this.activeGroup());
+	}
+
+	// The names of the groups a check is on in, for the editor's "in groups" line.
+	// Reads across the starters and the user groups, so it answers "where does
+	// turning this check off actually change something".
+	inGroupNames(slug: string): string[] {
+		const descriptor = describeCheck(slug, this.userChecks);
+		if (!descriptor) {
+			return [];
+		}
+		return allGroups(this.userGroups)
+			.filter((group) => isCheckEnabledInGroup(group, descriptor))
+			.map((group) => group.name);
 	}
 
 	// The roll-up threshold in effect: the active group's. The settings tab shows
@@ -692,9 +798,21 @@ export default class PlumblinePlugin extends Plugin {
 	// Toggle one built-in rule on or off for the active group. On is the default,
 	// so an enabled check stores nothing and only "off" is recorded, which keeps
 	// the group definition sparse.
-	async setRuleEnabled(slug: string, enabled: boolean): Promise<void> {
+	async setCheckEnabled(slug: string, enabled: boolean): Promise<void> {
+		// The defaults run opposite ways, so a sparse membership records only the
+		// deviation: a pack or heuristic check is on unless a membership turns it
+		// off, so "on" clears the flag; a custom check is off unless a membership
+		// turns it on, so "off" clears it. Either way the not-deviating state stores
+		// nothing.
+		const isCustom = findCustomCheck(slug, this.userChecks) !== undefined;
 		await this.mutateMembership(slug, (membership) => {
-			if (enabled) {
+			if (isCustom) {
+				if (enabled) {
+					membership.enabled = true;
+				} else {
+					delete membership.enabled;
+				}
+			} else if (enabled) {
 				delete membership.enabled;
 			} else {
 				membership.enabled = false;
@@ -733,6 +851,35 @@ export default class PlumblinePlugin extends Plugin {
 		});
 	}
 
+	// Set or clear a check's confidence override in the active group. Null clears it
+	// so the check falls back to its record's confidence; any value is range-clamped
+	// when the group resolves.
+	async setRuleConfidence(
+		slug: string,
+		confidence: number | null,
+	): Promise<void> {
+		await this.mutateMembership(slug, (membership) => {
+			if (confidence === null) {
+				delete membership.confidence;
+			} else {
+				membership.confidence = confidence;
+			}
+		});
+	}
+
+	// Set or clear a check's per-membership roll-up override in the active group.
+	// Null clears it so the check falls back to the group's threshold; roll-up is
+	// the one knob whose default lives on the group (config-model.md).
+	async setRuleRollup(slug: string, rollup: number | null): Promise<void> {
+		await this.mutateMembership(slug, (membership) => {
+			if (rollup === null) {
+				delete membership.rollup;
+			} else {
+				membership.rollup = rollup;
+			}
+		});
+	}
+
 	// Set the roll-up threshold on the active group, forking a starter first if
 	// needed, then re-analyze. A bad value is clamped when the group resolves.
 	async setRollupThreshold(threshold: number): Promise<void> {
@@ -741,6 +888,208 @@ export default class PlumblinePlugin extends Plugin {
 		await this.saveUserGroups();
 		await this.saveSettings();
 		this.applyConfigChange();
+	}
+
+	// The custom checks, for the settings tab's library and "Your custom checks"
+	// list. A copy, so a caller cannot mutate the store in place.
+	customCheckList(): CustomCheck[] {
+		return [...this.userChecks];
+	}
+
+	// Load the custom checks from the vault. A missing file is the common case and
+	// resolves to an empty list, not an error, matching loadUserGroups.
+	private async loadUserChecks(): Promise<void> {
+		try {
+			const adapter = this.app.vault.adapter;
+			if (!(await adapter.exists(USER_CHECKS_PATH))) {
+				this.userChecks = [];
+				return;
+			}
+			this.userChecks = parseUserChecks(
+				JSON.parse(await adapter.read(USER_CHECKS_PATH)) as unknown,
+			);
+		} catch (err) {
+			console.error(err);
+			this.userChecks = [];
+		}
+	}
+
+	// Persist the custom checks, serialized through the save queue so a check edit
+	// and a group edit cannot interleave their writes.
+	private async saveUserChecks(): Promise<void> {
+		this.saveQueue = this.saveQueue.then(() => this.writeUserChecks());
+		await this.saveQueue;
+	}
+
+	private async writeUserChecks(): Promise<void> {
+		try {
+			const dir = '.plumbline';
+			const adapter = this.app.vault.adapter;
+			if (!(await adapter.exists(dir))) {
+				await adapter.mkdir(dir);
+			}
+			await adapter.write(
+				USER_CHECKS_PATH,
+				serializeUserChecks(this.userChecks),
+			);
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not save the custom checks.');
+		}
+	}
+
+	// A check slug not already taken by a built-in or a custom check, derived from a
+	// base by appending -2, -3, and so on. A custom check may never take a built-in
+	// slug, or it would collide with the locked pack check.
+	private uniqueCheckSlug(base: string): string {
+		const clean = base.length > 0 ? base : 'custom-check';
+		const taken = (slug: string): boolean =>
+			isBuiltInSlug(slug) ||
+			this.userChecks.some((check) => check.slug === slug) ||
+			// Also avoid a legacy global custom rule in .plumbline/config.json: a
+			// shared slug would let resolveConfig add the library copy AND have
+			// mergeRules append the legacy one, doubling every diagnostic.
+			this.vaultConfig.rules.some((rule) => rule.slug === slug);
+		if (!taken(clean)) {
+			return clean;
+		}
+		let n = 2;
+		while (taken(`${clean}-${n}`)) {
+			n += 1;
+		}
+		return `${clean}-${n}`;
+	}
+
+	// A slug from a display name: lower case, non-alphanumeric runs to single
+	// hyphens, trimmed. Empty (a name of only punctuation) falls back to the caller.
+	private static slugify(name: string): string {
+		// The first replace collapses every non-alphanumeric run to a single
+		// hyphen, so at most one hyphen can sit at each end; a single-character
+		// strip is enough and avoids the backtracking a `-+` anchor would risk.
+		return name
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, '-')
+			.replace(/^-/, '')
+			.replace(/-$/, '');
+	}
+
+	// Create a new, empty custom phrase check and return its slug. It is added to
+	// the library but not to any group; the writer turns it on from the library.
+	// A name gives it a readable label and seeds a stable slug.
+	async createCustomCheck(name?: string): Promise<string> {
+		const display = name?.trim() ? name.trim() : 'New check';
+		const slug = this.uniqueCheckSlug(
+			PlumblinePlugin.slugify(display) || 'custom-check',
+		);
+		this.userChecks.push({
+			slug,
+			name: display,
+			message: 'Custom check.',
+			category: CUSTOM_PACK_ID,
+			severity: 'suggestion',
+			phrases: [],
+		});
+		await this.saveUserChecks();
+		this.applyConfigChange();
+		return slug;
+	}
+
+	// Edit a custom check's definition (name, message, phrases). A built-in check's
+	// matching is locked, so a non-custom slug is a no-op. Re-analyzes, which
+	// matters when the check is on in the active group.
+	async updateCustomCheck(
+		slug: string,
+		patch: Partial<Pick<CustomCheck, 'name' | 'message' | 'phrases'>>,
+	): Promise<void> {
+		const check = findCustomCheck(slug, this.userChecks);
+		if (!check) {
+			return;
+		}
+		// Name and message must stay non-empty: parseUserChecks drops a check with
+		// an empty name or message, so persisting one the user cleared would make
+		// the whole check vanish on the next load. An all-whitespace edit keeps the
+		// previous value rather than writing an unloadable record. Phrases may be
+		// empty (a check with no phrases simply matches nothing).
+		if (patch.name !== undefined && patch.name.trim().length > 0) {
+			check.name = patch.name;
+		}
+		if (patch.message !== undefined && patch.message.trim().length > 0) {
+			check.message = patch.message;
+		}
+		if (patch.phrases !== undefined) {
+			check.phrases = patch.phrases;
+		}
+		await this.saveUserChecks();
+		this.applyConfigChange();
+	}
+
+	// Delete a custom check and remove its membership from every user group, so no
+	// group is left referencing a check that no longer exists. A built-in is not
+	// deletable, so a non-custom slug is a no-op.
+	async deleteCustomCheck(slug: string): Promise<void> {
+		const index = this.userChecks.findIndex((check) => check.slug === slug);
+		if (index === -1) {
+			return;
+		}
+		this.userChecks.splice(index, 1);
+		let groupsChanged = false;
+		for (const group of this.userGroups) {
+			if (group.checks[slug]) {
+				delete group.checks[slug];
+				groupsChanged = true;
+			}
+		}
+		await this.saveUserChecks();
+		if (groupsChanged) {
+			await this.saveUserGroups();
+		}
+		this.applyConfigChange();
+	}
+
+	// Fork any check into an editable custom copy and return its slug, or null if
+	// the source resolves to nothing. This is how a built-in's locked matching is
+	// customized: the copy carries the source's phrases, message, and severity, and
+	// is editable and deletable. A heuristic has no phrase list to fork, so it is
+	// refused (null). The copy is added to the library, not to any group.
+	async duplicateCheckToCustom(sourceSlug: string): Promise<string | null> {
+		const descriptor = describeCheck(sourceSlug, this.userChecks);
+		if (!descriptor || descriptor.isHeuristic) {
+			return null;
+		}
+		const phrases = this.checkPhrases(sourceSlug);
+		if (phrases === undefined) {
+			return null;
+		}
+		const baseName = descriptor.name ?? prettifySlug(sourceSlug);
+		const slug = this.uniqueCheckSlug(
+			PlumblinePlugin.slugify(baseName) || 'custom-check',
+		);
+		const copy: CustomCheck = {
+			slug,
+			name: `${baseName} (copy)`,
+			message: descriptor.message,
+			category: CUSTOM_PACK_ID,
+			severity: descriptor.defaultSeverity,
+			phrases: [...phrases],
+		};
+		this.userChecks.push(copy);
+		await this.saveUserChecks();
+		this.applyConfigChange();
+		return slug;
+	}
+
+	// The phrase list behind a check slug: the custom check's own phrases, or a
+	// built-in phrase rule's. Undefined when the slug is unknown or names a
+	// heuristic, which matches on structure rather than a phrase list.
+	private checkPhrases(slug: string): string[] | undefined {
+		const custom = findCustomCheck(slug, this.userChecks);
+		if (custom) {
+			return custom.phrases;
+		}
+		const rule = [...BASE_RULES, ...SCRIPTURE_RULES].find(
+			(r) => r.slug === slug,
+		);
+		return rule?.phrases;
 	}
 
 	// Safe read-modify-write for .plumbline/config.json. Reads the current file,
