@@ -3,15 +3,17 @@ import {
 	Notice,
 	PluginSettingTab,
 	Setting,
+	SettingDefinition,
 	SettingDefinitionItem,
 	SettingDefinitionList,
 	SettingPage,
 } from 'obsidian';
 import type PlumblinePlugin from './main';
-import type { RuleState } from './main';
+import type { CheckState } from './main';
 import { allGroups } from './engine/group-store';
 import type { GroupDefinition } from './engine/groups';
 import { SCRIPTURE_PACK_ID } from './engine/scripture';
+import { prettifySlug } from './engine/config';
 import type { Severity } from './engine/types';
 
 // Community discussion for this plugin. This must stay a never-expiring
@@ -20,19 +22,43 @@ import type { Severity } from './engine/types';
 // invite expires after 7 days and would rot in a shipped release.
 const DISCORD_URL = 'https://discord.gg/gd6tKJDPj4';
 
-// The comment-span toggles are keyed with this prefix so getControlValue and
-// setControlValue can route them to the vault config instead of plugin settings.
-// The rule rows are rendered imperatively (renderRuleRow) and write to the active
-// group's membership, so they need no such key. The roll-up control uses the plain
-// 'rollup' key, routed to the active group.
+// Declarative control keys are routed by prefix in getControlValue/setControlValue.
+// A span: key toggles a comment span in the vault config; a lib: key toggles a
+// check's membership in the active group; the roll-up key writes the active group's
+// threshold. Every other key is a plugin setting. Check rows in the active-rules
+// list and the check editor are page/imperative, so they do not pass through here.
 const SPAN_KEY_PREFIX = 'span:';
+const LIB_KEY_PREFIX = 'lib:';
 const ROLLUP_KEY = 'rollup';
 
-// Turn a rule slug into a readable, sentence-case label ('reader-direction' ->
-// 'Reader direction') for the settings list.
-function prettifySlug(slug: string): string {
-	const spaced = slug.replace(/-/g, ' ');
-	return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+const SEVERITY_LABEL: Record<Severity, string> = {
+	error: 'Error',
+	warning: 'Warning',
+	suggestion: 'Suggestion',
+};
+
+// The display label for a check: a custom check's editable name, or a built-in's
+// slug prettified.
+function checkLabel(state: Pick<CheckState, 'slug' | 'name'>): string {
+	return state.name ?? prettifySlug(state.slug);
+}
+
+// A phrase list from the textarea: one per line, trimmed, blanks dropped.
+function splitPhrases(text: string): string[] {
+	return text
+		.split('\n')
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0);
+}
+
+// Does a check row match a library/active-rules search query? Matches the label
+// and the message, case-insensitively, so a search finds a check by what it is
+// called or by what it says.
+function matchCheckDefinition(def: SettingDefinition, query: string): boolean {
+	const q = query.toLowerCase();
+	const name = (def.name ?? '').toLowerCase();
+	const desc = typeof def.desc === 'string' ? def.desc.toLowerCase() : '';
+	return name.includes(q) || desc.includes(q);
 }
 
 export class PlumblineSettingTab extends PluginSettingTab {
@@ -125,16 +151,16 @@ export class PlumblineSettingTab extends PluginSettingTab {
 					},
 				})),
 			},
+			this.buildActiveRulesList(),
 			{
-				type: 'group',
-				heading: 'Active rules',
-				items: this.plugin.profileRuleStates().map((state) => ({
-					name: prettifySlug(state.slug),
-					searchable: false,
-					render: (setting: Setting) => {
-						this.renderRuleRow(setting, state);
-					},
-				})),
+				type: 'page',
+				name: 'Check library',
+				desc: 'Browse every check, create your own, and choose which run in the active group.',
+				displayValue: () => this.describeLibraryCount(),
+				items: [
+					this.buildCustomCheckList(),
+					this.buildBuiltinToggleList(),
+				],
 			},
 			{
 				name: '',
@@ -147,15 +173,20 @@ export class PlumblineSettingTab extends PluginSettingTab {
 	}
 
 	// Binds declarative controls to their store. A span: key routes to the vault
-	// config's disabled-span set; the roll-up key routes to the active group; every
-	// other key is a plugin setting. Rule rows are rendered (renderRuleRow), not
-	// declarative controls, so they do not pass through here.
+	// config's disabled-span set; a lib: key routes to the active group's check
+	// membership; the roll-up key routes to the active group; every other key is a
+	// plugin setting. Rule rows and the check editor are page/imperative, so they do
+	// not pass through here.
 	getControlValue(key: string): unknown {
 		if (key.startsWith(SPAN_KEY_PREFIX)) {
 			const kind = key.slice(SPAN_KEY_PREFIX.length);
 			return this.plugin
 				.commentSpanStates()
 				.some((state) => state.kind === kind && state.enabled);
+		}
+		if (key.startsWith(LIB_KEY_PREFIX)) {
+			const slug = key.slice(LIB_KEY_PREFIX.length);
+			return this.plugin.checkState(slug)?.enabled ?? false;
 		}
 		if (key === ROLLUP_KEY) {
 			return String(this.plugin.currentRollupThreshold());
@@ -169,6 +200,16 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		if (key.startsWith(SPAN_KEY_PREFIX)) {
 			const kind = key.slice(SPAN_KEY_PREFIX.length);
 			await this.plugin.setSpanKindEnabled(kind, Boolean(value));
+			return;
+		}
+		if (key.startsWith(LIB_KEY_PREFIX)) {
+			const slug = key.slice(LIB_KEY_PREFIX.length);
+			// Ticking a check in the library while a read-only starter is active
+			// forks an editable copy and switches to it, so re-render the tab to
+			// show the copy rather than the stale starter.
+			await this.withActiveGroupRerender(() =>
+				this.plugin.setCheckEnabled(slug, Boolean(value)),
+			);
 			return;
 		}
 		if (key === ROLLUP_KEY) {
@@ -197,8 +238,8 @@ export class PlumblineSettingTab extends PluginSettingTab {
 
 	// Run a tuning change, then re-render the whole tab if it switched the active
 	// group. Tuning a read-only starter forks an editable copy and makes it active,
-	// so the dropdown and the rule rows below would otherwise show the old group
-	// until the tab was reopened.
+	// so the dropdown and the rows below would otherwise show the old group until
+	// the tab was reopened.
 	private async withActiveGroupRerender(
 		change: () => Promise<void>,
 	): Promise<void> {
@@ -242,6 +283,14 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		const yoursLabel =
 			yours === 0 ? 'none of your own' : `${yours} of your own`;
 		return `${starters} starters, ${yoursLabel}`;
+	}
+
+	// Count shown on the "Check library" entry: how many custom checks exist.
+	private describeLibraryCount(): string {
+		const custom = this.plugin.customCheckList().length;
+		return custom === 0
+			? 'no custom checks yet'
+			: `${custom} custom check${custom === 1 ? '' : 's'}`;
 	}
 
 	// The user's editable groups: each opens an editor, with delete on the row and
@@ -298,37 +347,101 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		};
 	}
 
-	// One rule row: name and message, a severity dropdown, and an on/off toggle,
-	// both writing to the active group's membership (forking a read-only starter
-	// first). Choosing a rule's own default severity clears the override rather
-	// than storing a no-op entry.
-	private renderRuleRow(setting: Setting, state: RuleState): void {
-		setting.setName(prettifySlug(state.slug)).setDesc(state.message);
-		setting.addDropdown((dropdown) => {
-			dropdown
-				.addOption('error', 'Error')
-				.addOption('warning', 'Warning')
-				.addOption('suggestion', 'Suggestion')
-				.setValue(state.severity)
-				.onChange((value) => {
-					const severity = value as Severity;
-					void this.withActiveGroupRerender(() =>
-						this.plugin.setRuleSeverity(
-							state.slug,
-							severity === state.defaultSeverity
-								? null
-								: severity,
-						),
-					);
-				});
-		});
-		setting.addToggle((toggle) => {
-			toggle.setValue(state.enabled).onChange((value) => {
-				void this.withActiveGroupRerender(() =>
-					this.plugin.setRuleEnabled(state.slug, value),
-				);
-			});
-		});
+	// The active group's checks: every built-in pack and heuristic check (on or
+	// off) plus the custom checks the group has enabled, each opening the check
+	// editor. The row surfaces the effective severity, or "Off", so the ruleset
+	// reads at a glance without opening each one.
+	private buildActiveRulesList(): SettingDefinitionList {
+		return {
+			type: 'list',
+			heading: 'Active rules',
+			search: {
+				placeholder: 'Search checks',
+				match: matchCheckDefinition,
+			},
+			items: this.plugin.activeCheckStates().map((state) => ({
+				type: 'page' as const,
+				name: checkLabel(state),
+				desc: state.message,
+				displayValue: () => this.describeCheckRow(state.slug),
+				page: () => new CheckEditorPage(this, state.slug),
+			})),
+		};
+	}
+
+	// The library's "Your custom checks" list: create, edit, and delete. Each row
+	// opens the check editor; the delete index is into this same list.
+	private buildCustomCheckList(): SettingDefinitionList {
+		const checks = this.plugin.customCheckList();
+		return {
+			type: 'list',
+			heading: 'Your custom checks',
+			emptyState:
+				'No custom checks yet. Add one with New check, then turn it on in a group.',
+			onDelete: (index: number) => {
+				const check = this.plugin.customCheckList()[index];
+				if (!check) {
+					return;
+				}
+				void (async () => {
+					await this.plugin.deleteCustomCheck(check.slug);
+					new Notice(`Plumbline: deleted ${check.name}.`);
+					this.update();
+				})();
+			},
+			addItem: {
+				name: 'New check',
+				action: () => {
+					void (async () => {
+						await this.plugin.createCustomCheck();
+						this.update();
+					})();
+				},
+			},
+			items: checks.map((check) => ({
+				type: 'page' as const,
+				name: check.name,
+				desc: check.message,
+				displayValue: () => this.describeCheckRow(check.slug),
+				page: () => new CheckEditorPage(this, check.slug),
+			})),
+		};
+	}
+
+	// The library's built-in checks: every pack and heuristic check the active
+	// group can draw from, each a tick that turns it on or off in the group. The
+	// search filters by label and message. Custom checks are composed from their
+	// own editor, so they are not repeated here.
+	private buildBuiltinToggleList(): SettingDefinitionList {
+		const builtins = this.plugin
+			.libraryCheckStates()
+			.filter((state) => !state.isCustom);
+		return {
+			type: 'list',
+			heading: 'Built-in checks',
+			search: {
+				placeholder: 'Search checks',
+				match: matchCheckDefinition,
+			},
+			items: builtins.map((state) => ({
+				name: checkLabel(state),
+				desc: state.message,
+				control: {
+					type: 'toggle' as const,
+					key: `${LIB_KEY_PREFIX}${state.slug}`,
+				},
+			})),
+		};
+	}
+
+	// The value shown on a check's row: its effective severity when on, or "Off".
+	// Read fresh so update() reflects a change made in the editor.
+	private describeCheckRow(slug: string): string {
+		const state = this.plugin.checkState(slug);
+		if (!state) {
+			return '';
+		}
+		return state.enabled ? SEVERITY_LABEL[state.effectiveSeverity] : 'Off';
 	}
 
 	// Renders the version + links footer into a trailing settings row. Each
@@ -481,5 +594,272 @@ class GroupEditorPage extends SettingPage {
 					})();
 				}),
 			);
+	}
+}
+
+// A navigable sub-page for one check, in the context of the active group. It shows
+// the inherit/override cascade for severity, confidence, and roll-up, whether the
+// check is on, and which groups it is on in. A built-in offers Duplicate to fork
+// an editable copy; a custom check adds its editable definition (name, message,
+// phrases) and a delete. Editing any tuning forks a read-only starter into an
+// editable copy first. Reached only through a list `page` item, since the
+// framework has no way to open a SettingPage from a button.
+class CheckEditorPage extends SettingPage {
+	private tab: PlumblineSettingTab;
+	private slug: string;
+
+	constructor(tab: PlumblineSettingTab, slug: string) {
+		super();
+		this.tab = tab;
+		this.slug = slug;
+		const state = this.state();
+		this.title = state ? checkLabel(state) : 'Check';
+	}
+
+	private get plugin(): PlumblinePlugin {
+		return this.tab.plugin;
+	}
+
+	private state(): CheckState | undefined {
+		return this.plugin.checkState(this.slug);
+	}
+
+	// Rebuild the parent tab on the way out, so a rename, a new severity, or a
+	// delete shows in the active-rules list and the library.
+	hide(): void {
+		super.hide();
+		this.tab.update();
+	}
+
+	display(): void {
+		const editor = this.containerEl;
+		editor.empty();
+		const state = this.state();
+		if (!state) {
+			editor.createEl('p', { text: 'This check no longer exists.' });
+			return;
+		}
+
+		new Setting(editor)
+			.setName('On in this group')
+			.setDesc(
+				'Whether this check runs in the active group. Editing a read-only starter makes an editable copy.',
+			)
+			.addToggle((toggle) => {
+				toggle.toggleEl.setAttribute('aria-label', 'On in this group');
+				toggle.setValue(state.enabled).onChange((value) => {
+					void this.plugin.setCheckEnabled(this.slug, value);
+				});
+			});
+
+		new Setting(editor)
+			.setName('Severity')
+			.setDesc(
+				'How prominently a hit is surfaced. Error is reserved for integrity failures.',
+			)
+			.addDropdown((dropdown) => {
+				dropdown.selectEl.setAttribute('aria-label', 'Severity');
+				dropdown.addOption(
+					'',
+					`Default (${SEVERITY_LABEL[state.defaultSeverity]})`,
+				);
+				dropdown
+					.addOption('error', SEVERITY_LABEL.error)
+					.addOption('warning', SEVERITY_LABEL.warning)
+					.addOption('suggestion', SEVERITY_LABEL.suggestion)
+					.setValue(state.overrideSeverity ?? '')
+					.onChange((value) => {
+						void this.plugin.setRuleSeverity(
+							this.slug,
+							value === '' ? null : (value as Severity),
+						);
+					});
+			});
+
+		new Setting(editor)
+			.setName('Confidence')
+			.setDesc(
+				'How much this check is trusted when it fires, which weighs it in the findings ranking.',
+			)
+			.addDropdown((dropdown) => {
+				dropdown.selectEl.setAttribute('aria-label', 'Confidence');
+				dropdown.addOption(
+					'',
+					`Default (${Math.round(state.defaultConfidence * 100)}%)`,
+				);
+				for (let pct = 10; pct <= 100; pct += 10) {
+					dropdown.addOption(String(pct), `${pct}%`);
+				}
+				dropdown
+					.setValue(
+						state.overrideConfidence === null
+							? ''
+							: String(
+									Math.round(state.overrideConfidence * 100),
+								),
+					)
+					.onChange((value) => {
+						void this.plugin.setRuleConfidence(
+							this.slug,
+							value === '' ? null : Number(value) / 100,
+						);
+					});
+			});
+
+		new Setting(editor)
+			.setName('Roll up a repeated check after')
+			.setDesc(
+				'Collapse this check to one row past this many hits in a note. Default follows the group.',
+			)
+			.addDropdown((dropdown) => {
+				dropdown.selectEl.setAttribute(
+					'aria-label',
+					'Roll up a repeated check after',
+				);
+				dropdown.addOption(
+					'',
+					`Group default (${state.groupRollupThreshold})`,
+				);
+				for (let hits = 1; hits <= 8; hits++) {
+					dropdown.addOption(
+						String(hits),
+						`${hits} hit${hits === 1 ? '' : 's'}`,
+					);
+				}
+				dropdown
+					.setValue(
+						state.overrideRollup === null
+							? ''
+							: String(state.overrideRollup),
+					)
+					.onChange((value) => {
+						void this.plugin.setRuleRollup(
+							this.slug,
+							value === '' ? null : Number(value),
+						);
+					});
+			});
+
+		const groups = this.plugin.inGroupNames(this.slug);
+		new Setting(editor)
+			.setName('In groups')
+			.setDesc(
+				groups.length > 0
+					? groups.join(', ')
+					: 'Not on in any group yet.',
+			);
+
+		if (state.isCustom) {
+			this.renderCustomDefinition(editor, state);
+		}
+
+		// Duplicate is the way to fork a locked built-in phrase rule into an
+		// editable copy. A custom check is already editable (and has Delete), so it
+		// is not offered there; a heuristic has no phrase list to fork.
+		if (!state.isHeuristic && !state.isCustom) {
+			new Setting(editor)
+				.setName('Duplicate')
+				.setDesc(
+					'Make an editable copy in your custom checks, so you can change its wording and phrases.',
+				)
+				.addButton((button) => {
+					button.buttonEl.setAttribute(
+						'aria-label',
+						`Duplicate ${checkLabel(state)}`,
+					);
+					button.setButtonText('Duplicate').onClick(() => {
+						void (async () => {
+							const id = await this.plugin.duplicateCheckToCustom(
+								this.slug,
+							);
+							if (id) {
+								new Notice(
+									`Plumbline: copied ${checkLabel(state)}.`,
+								);
+								this.tab.update();
+							}
+						})();
+					});
+				});
+		}
+	}
+
+	// The editable definition of a custom check: its name, the message shown on a
+	// finding, the phrases it matches, and a delete. A built-in's matching is
+	// locked, so this section is custom-only.
+	private renderCustomDefinition(
+		editor: HTMLElement,
+		state: CheckState,
+	): void {
+		const check = this.plugin
+			.customCheckList()
+			.find((entry) => entry.slug === this.slug);
+		if (!check) {
+			return;
+		}
+
+		new Setting(editor).setName('Name').addText((text) => {
+			text.inputEl.setAttribute('aria-label', 'Check name');
+			text.setValue(check.name).onChange((value) => {
+				this.title = value || 'Check';
+				void this.plugin.updateCustomCheck(this.slug, { name: value });
+			});
+		});
+
+		new Setting(editor)
+			.setName('Message')
+			.setDesc('Shown on every finding this check makes.')
+			.addText((text) => {
+				text.inputEl.setAttribute('aria-label', 'Finding message');
+				text.setValue(check.message).onChange((value) => {
+					void this.plugin.updateCustomCheck(this.slug, {
+						message: value,
+					});
+				});
+			});
+
+		new Setting(editor)
+			.setName('Phrases')
+			.setDesc(
+				'One phrase per line, matched whole-word and case-insensitively, outside code and quoted spans.',
+			)
+			.setClass('plumbline-stacked-row')
+			.addTextArea((area) => {
+				area.inputEl.setAttribute(
+					'aria-label',
+					'Phrases, one per line',
+				);
+				area.setValue(check.phrases.join('\n'))
+					.setPlaceholder('One phrase per line')
+					.onChange((value) => {
+						void this.plugin.updateCustomCheck(this.slug, {
+							phrases: splitPhrases(value),
+						});
+					});
+			});
+
+		new Setting(editor)
+			.setName('Delete this check')
+			.setDesc(
+				'Remove it from the library and from every group. This cannot be undone.',
+			)
+			.addButton((button) => {
+				button.buttonEl.setAttribute(
+					'aria-label',
+					`Delete ${checkLabel(state)}`,
+				);
+				button
+					.setButtonText('Delete')
+					.setDestructive()
+					.onClick(() => {
+						void (async () => {
+							await this.plugin.deleteCustomCheck(this.slug);
+							new Notice(
+								`Plumbline: deleted ${checkLabel(state)}.`,
+							);
+							this.display();
+						})();
+					});
+			});
 	}
 }
