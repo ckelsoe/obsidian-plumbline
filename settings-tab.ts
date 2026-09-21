@@ -6,7 +6,7 @@ import {
 } from 'obsidian';
 import type PlumblinePlugin from './main';
 import type { RuleState } from './main';
-import { STARTER_GROUPS } from './engine/groups';
+import { allGroups } from './engine/group-store';
 import type { Severity } from './engine/types';
 
 // Community discussion for this plugin. This must stay a never-expiring
@@ -17,19 +17,11 @@ const DISCORD_URL = 'https://discord.gg/gd6tKJDPj4';
 
 // The comment-span toggles are keyed with this prefix so getControlValue and
 // setControlValue can route them to the vault config instead of plugin settings.
-// The rule rows are rendered imperatively (renderRuleRow) and write to the vault
-// config directly, so they need no such key. The roll-up control uses the plain
-// 'rollup' key, routed the same way.
+// The rule rows are rendered imperatively (renderRuleRow) and write to the active
+// group's membership, so they need no such key. The roll-up control uses the plain
+// 'rollup' key, routed to the active group.
 const SPAN_KEY_PREFIX = 'span:';
 const ROLLUP_KEY = 'rollup';
-
-// The built-in starter groups the dropdown offers, derived from the group data so
-// the labels never drift from the definitions. Each is a read-only example a
-// writer clones and tunes for their own work. See config-model.md.
-const PROFILE_OPTIONS: Record<string, string> = {};
-for (const group of STARTER_GROUPS) {
-	PROFILE_OPTIONS[group.id] = group.name;
-}
 
 // Turn a rule slug into a readable, sentence-case label ('reader-direction' ->
 // 'Reader direction') for the settings list.
@@ -50,15 +42,15 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		return [
 			{
 				type: 'group',
-				heading: 'Writing profile',
+				heading: 'Writing group',
 				items: [
 					{
-						name: 'Active profile',
-						desc: 'The type of writing to lint for. The profile selects which rule packs are on and how they are tuned. A note can override this with a plumbline-profile key in its frontmatter.',
+						name: 'Active group',
+						desc: 'The group of checks to run on your notes. A group turns a set of checks on and tunes them. The two starters are read-only worked examples; editing one makes an editable copy. A note can override this with a plumbline-profile key in its frontmatter.',
 						control: {
 							type: 'dropdown',
 							key: 'activeProfile',
-							options: PROFILE_OPTIONS,
+							options: this.groupOptions(),
 						},
 					},
 				],
@@ -139,8 +131,10 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		];
 	}
 
-	// Binds declarative control definitions to their store. A `rule:` key reads
-	// from the vault config's disabled set; every other key is a plugin setting.
+	// Binds declarative controls to their store. A span: key routes to the vault
+	// config's disabled-span set; the roll-up key routes to the active group; every
+	// other key is a plugin setting. Rule rows are rendered (renderRuleRow), not
+	// declarative controls, so they do not pass through here.
 	getControlValue(key: string): unknown {
 		if (key.startsWith(SPAN_KEY_PREFIX)) {
 			const kind = key.slice(SPAN_KEY_PREFIX.length);
@@ -184,9 +178,21 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		}
 	}
 
+	// The active-group dropdown options: every group the user can pick, starters
+	// first, keyed by id. Built from live data so a new or renamed group shows
+	// without a stale label.
+	private groupOptions(): Record<string, string> {
+		const options: Record<string, string> = {};
+		for (const group of allGroups(this.plugin.groups())) {
+			options[group.id] = group.name;
+		}
+		return options;
+	}
+
 	// One rule row: name and message, a severity dropdown, and an on/off toggle,
-	// both writing straight to the vault config. Choosing a rule's own default
-	// severity clears the override rather than storing a no-op entry.
+	// both writing to the active group's membership (forking a read-only starter
+	// first). Choosing a rule's own default severity clears the override rather
+	// than storing a no-op entry.
 	private renderRuleRow(setting: Setting, state: RuleState): void {
 		setting.setName(prettifySlug(state.slug)).setDesc(state.message);
 		setting.addDropdown((dropdown) => {

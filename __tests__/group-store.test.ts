@@ -3,13 +3,17 @@ import {
 	serializeUserGroups,
 	findGroup,
 	allGroups,
+	hasFlatTuning,
+	buildMigratedGroup,
 } from '../engine/group-store';
 import { resolveConfig } from '../engine/config';
 import {
 	GroupDefinition,
 	DEVOTIONAL_NONFICTION_ID,
 	PLAIN_NONFICTION_ID,
+	starterGroup,
 } from '../engine/groups';
+import { EMPTY_VAULT_CONFIG, VaultConfig } from '../engine/vault-config';
 
 const userGroup = (over: Partial<GroupDefinition> = {}): GroupDefinition => ({
 	id: 'my-fiction',
@@ -147,5 +151,82 @@ describe('resolveConfig with a user group', () => {
 		expect(resolveConfig('ghost', undefined, []).profileId).toBe(
 			PLAIN_NONFICTION_ID,
 		);
+	});
+});
+
+const vaultConfig = (over: Partial<VaultConfig> = {}): VaultConfig => ({
+	...EMPTY_VAULT_CONFIG,
+	overrides: {},
+	confidence: {},
+	...over,
+});
+
+describe('hasFlatTuning', () => {
+	it('is false for an empty vault config', () => {
+		expect(hasFlatTuning(vaultConfig())).toBe(false);
+	});
+
+	it('is true for a rule toggle, a severity override, a threshold, or confidence', () => {
+		expect(hasFlatTuning(vaultConfig({ disabledRules: ['a'] }))).toBe(true);
+		expect(hasFlatTuning(vaultConfig({ rollupThreshold: 6 }))).toBe(true);
+		expect(hasFlatTuning(vaultConfig({ confidence: { a: 0.2 } }))).toBe(
+			true,
+		);
+		expect(
+			hasFlatTuning(
+				vaultConfig({ overrides: { a: { severity: 'error' } } }),
+			),
+		).toBe(true);
+	});
+
+	it('is false for a message-only override, which is not tuning it migrates', () => {
+		expect(
+			hasFlatTuning(vaultConfig({ overrides: { a: { message: 'hi' } } })),
+		).toBe(false);
+	});
+});
+
+describe('buildMigratedGroup', () => {
+	const devotional = starterGroup(DEVOTIONAL_NONFICTION_ID);
+	if (!devotional) {
+		throw new Error('missing devotional starter');
+	}
+
+	it('folds flat tuning into membership and clones the starter', () => {
+		const migrated = buildMigratedGroup(
+			devotional,
+			vaultConfig({
+				disabledRules: ['cinematic-opener'],
+				rollupThreshold: 6,
+				confidence: { anaphora: 0.2 },
+				overrides: {
+					'reader-direction': { severity: 'error' },
+					// A message-only override is not membership tuning, so it does
+					// not become a check membership here.
+					'summative-closer': { message: 'custom' },
+				},
+			}),
+			'devotional-nonfiction-2',
+		);
+		expect(migrated.id).toBe('devotional-nonfiction-2');
+		expect(migrated.builtIn).toBe(false);
+		expect(migrated.name).toBe('Devotional nonfiction (my copy)');
+		expect(migrated.extends).toEqual(devotional.extends);
+		expect(migrated.rollupThreshold).toBe(6);
+		expect(migrated.checks['cinematic-opener']).toEqual({ enabled: false });
+		expect(migrated.checks['reader-direction']).toEqual({
+			severity: 'error',
+		});
+		expect(migrated.checks.anaphora).toEqual({ confidence: 0.2 });
+		expect(migrated.checks['summative-closer']).toBeUndefined();
+	});
+
+	it('keeps the starter threshold when the config sets none', () => {
+		const migrated = buildMigratedGroup(
+			devotional,
+			vaultConfig({ disabledRules: ['anaphora'] }),
+			'x',
+		);
+		expect(migrated.rollupThreshold).toBe(devotional.rollupThreshold);
 	});
 });

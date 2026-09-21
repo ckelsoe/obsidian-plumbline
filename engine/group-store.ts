@@ -5,7 +5,7 @@ import {
 	starterGroup,
 } from './groups';
 import { DEFAULT_ROLLUP_THRESHOLD } from './rollup';
-import { asSeverity, asStringArray } from './vault-config';
+import { VaultConfig, asSeverity, asStringArray } from './vault-config';
 
 // User groups live in the vault (.plumbline/groups.json), editable and shareable;
 // the built-in starters ship read-only in code. This module parses that untrusted
@@ -144,4 +144,57 @@ export function allGroups(
 	userGroups: readonly GroupDefinition[],
 ): GroupDefinition[] {
 	return [...STARTER_GROUPS, ...userGroups];
+}
+
+// Whether a vault config carries phase-2's flat tuning: rule toggles, severity
+// overrides, a roll-up threshold, or confidence overrides. Message and phrase
+// overrides and custom rules are not tuning in this sense; they stay in the vault
+// config and are not migrated.
+export function hasFlatTuning(vaultConfig: VaultConfig): boolean {
+	return (
+		vaultConfig.disabledRules.length > 0 ||
+		vaultConfig.rollupThreshold !== undefined ||
+		Object.keys(vaultConfig.confidence ?? {}).length > 0 ||
+		Object.values(vaultConfig.overrides).some(
+			(override) => override.severity !== undefined,
+		)
+	);
+}
+
+// Build an editable group that reproduces phase-2's flat vault-config tuning as
+// per-check membership, cloning `starter`. This is the one-time migration off the
+// flat config.json onto the group model: rule toggles become enabled:false, a
+// severity override becomes a membership severity, confidence carries over, and
+// the roll-up threshold moves to the group. `id` is supplied by the caller, which
+// owns collision avoidance against the other groups.
+export function buildMigratedGroup(
+	starter: GroupDefinition,
+	vaultConfig: VaultConfig,
+	id: string,
+): GroupDefinition {
+	const checks: Record<string, CheckMembership> = structuredClone(
+		starter.checks,
+	);
+	const merge = (slug: string, patch: CheckMembership): void => {
+		checks[slug] = { ...checks[slug], ...patch };
+	};
+	for (const slug of vaultConfig.disabledRules) {
+		merge(slug, { enabled: false });
+	}
+	for (const [slug, override] of Object.entries(vaultConfig.overrides)) {
+		if (override.severity) {
+			merge(slug, { severity: override.severity });
+		}
+	}
+	for (const [slug, value] of Object.entries(vaultConfig.confidence ?? {})) {
+		merge(slug, { confidence: value });
+	}
+	return {
+		id,
+		name: starter.builtIn ? `${starter.name} (my copy)` : starter.name,
+		builtIn: false,
+		extends: [...starter.extends],
+		rollupThreshold: vaultConfig.rollupThreshold ?? starter.rollupThreshold,
+		checks,
+	};
 }
