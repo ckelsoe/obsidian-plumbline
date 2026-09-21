@@ -35,7 +35,6 @@ import {
 	ResolvedConfig,
 	Severity,
 } from './engine/types';
-import { DEFAULT_ROLLUP_THRESHOLD } from './engine/rollup';
 import { fileScope } from './engine/file-scope';
 import { lint } from './engine/lint';
 import { buildReport } from './report';
@@ -57,17 +56,33 @@ import {
 	EMPTY_VAULT_CONFIG,
 	parseVaultConfig,
 } from './engine/vault-config';
-import { migrateGroupId } from './engine/groups';
+import {
+	CheckMembership,
+	GroupDefinition,
+	fallbackGroup,
+	migrateGroupId,
+} from './engine/groups';
+import {
+	USER_GROUPS_PATH,
+	parseUserGroups,
+	serializeUserGroups,
+	findGroup,
+	hasFlatTuning,
+	buildMigratedGroup,
+} from './engine/group-store';
+import { BASE_PACK_ID } from './engine/packs';
+import { SCRIPTURE_PACK_ID } from './engine/scripture';
+import { DEFAULT_ROLLUP_THRESHOLD } from './engine/rollup';
 
-// One built-in rule (mechanical or heuristic), paired with whether the vault
-// config currently has it on. Drives the settings list so a rule can be toggled
+// One built-in rule (mechanical or heuristic), paired with the active group's
+// tuning for it. Drives the settings list so a rule can be toggled and retuned
 // without hand-editing JSON.
 export interface RuleState extends RuleInfo {
 	enabled: boolean;
-	// `severity` (from RuleInfo) carries the EFFECTIVE severity, the vault
-	// override if there is one or the rule's default otherwise. `defaultSeverity`
-	// keeps the record's own value, so the settings tab can tell when a row is
-	// overridden and offer a reset to the default.
+	// `severity` (from RuleInfo) carries the EFFECTIVE severity: the active group's
+	// membership override if there is one, or the rule's default otherwise.
+	// `defaultSeverity` keeps the record's own value, so the settings tab can tell
+	// when a row is overridden and offer a reset to the default.
 	defaultSeverity: Severity;
 }
 
@@ -112,6 +127,10 @@ export default class PlumblinePlugin extends Plugin {
 	// reach for on the plugin instance.
 	readonly api = new PlumblineApiImpl(this);
 	private vaultConfig: VaultConfig = EMPTY_VAULT_CONFIG;
+	// The user's own groups, loaded from .plumbline/groups.json. The built-in
+	// starters live in code; these are the editable ones. The active group is one
+	// of the starters or one of these. See config-model.md, "What lives where".
+	private userGroups: GroupDefinition[] = [];
 	// Serializes config writes so two quick toggles cannot interleave their
 	// read-modify-write of the file and drop one.
 	private saveQueue: Promise<void> = Promise.resolve();
@@ -125,6 +144,8 @@ export default class PlumblinePlugin extends Plugin {
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		await this.loadVaultConfig();
+		await this.loadUserGroups();
+		await this.migrateFlatTuning();
 		this.statusBar = this.addStatusBarItem();
 		this.addSettingTab(new PlumblineSettingTab(this.app, this));
 
@@ -297,7 +318,7 @@ export default class PlumblinePlugin extends Plugin {
 		const profile =
 			(text !== undefined ? fileScope(text).profileId : undefined) ??
 			this.settings.activeProfile;
-		return resolveConfig(profile, this.vaultConfig);
+		return resolveConfig(profile, this.vaultConfig, this.userGroups);
 	}
 
 	private async loadVaultConfig(): Promise<void> {
@@ -319,29 +340,322 @@ export default class PlumblinePlugin extends Plugin {
 
 	private async reloadVaultConfig(): Promise<void> {
 		await this.loadVaultConfig();
+		await this.loadUserGroups();
 		this.applyConfigChange();
 		new Notice('Plumbline: reloaded config.');
 	}
 
-	// The built-in rules for the active profile, mechanical and heuristic, each
-	// paired with whether the vault config currently has it enabled. The settings
-	// tab renders this.
-	profileRuleStates(): RuleState[] {
-		const disabled = new Set(this.vaultConfig.disabledRules);
-		const overrides = this.vaultConfig.overrides;
-		return profileRuleInfos(this.settings.activeProfile).map((info) => ({
-			...info,
-			enabled: !disabled.has(info.slug),
-			defaultSeverity: info.severity,
-			severity: overrides[info.slug]?.severity ?? info.severity,
-		}));
+	// Load the user's groups from the vault. A missing file is the common case (no
+	// custom groups yet) and resolves to an empty list, not an error.
+	private async loadUserGroups(): Promise<void> {
+		try {
+			const adapter = this.app.vault.adapter;
+			if (!(await adapter.exists(USER_GROUPS_PATH))) {
+				this.userGroups = [];
+				return;
+			}
+			this.userGroups = parseUserGroups(
+				JSON.parse(await adapter.read(USER_GROUPS_PATH)) as unknown,
+			);
+		} catch (err) {
+			console.error(err);
+			this.userGroups = [];
+		}
 	}
 
-	// The roll-up threshold in effect: the vault override, or the built-in
-	// default. The settings tab shows this and lets the writer change it without
-	// hand-editing the config file.
+	// Persist the user groups to the vault, serialized through the save queue so a
+	// group edit and a membership edit cannot interleave their writes. Only user
+	// groups are written; the built-in starters are code, not data.
+	private async saveUserGroups(): Promise<void> {
+		this.saveQueue = this.saveQueue.then(() => this.writeUserGroups());
+		await this.saveQueue;
+	}
+
+	private async writeUserGroups(): Promise<void> {
+		try {
+			const dir = '.plumbline';
+			const adapter = this.app.vault.adapter;
+			if (!(await adapter.exists(dir))) {
+				await adapter.mkdir(dir);
+			}
+			await adapter.write(
+				USER_GROUPS_PATH,
+				serializeUserGroups(this.userGroups),
+			);
+		} catch (err) {
+			console.error(err);
+			new Notice('Plumbline: could not save the groups.');
+		}
+	}
+
+	// The group in effect for the settings tab: the active starter or user group,
+	// or the base-only fallback if the stored id resolves to nothing.
+	activeGroup(): GroupDefinition {
+		return (
+			findGroup(this.settings.activeProfile, this.userGroups) ??
+			fallbackGroup()
+		);
+	}
+
+	// The user's own groups (not the starters). The settings tab combines these
+	// with the built-in starters through allGroups() for the dropdown and the list.
+	groups(): GroupDefinition[] {
+		return [...this.userGroups];
+	}
+
+	// One user group by id, the mutable object held in userGroups, or undefined.
+	// Starters are read-only and are never returned here.
+	private userGroupById(id: string): GroupDefinition | undefined {
+		return this.userGroups.find((group) => group.id === id);
+	}
+
+	// Create a new, empty base-only user group and make it active. Returns its id so
+	// the settings tab can open its editor.
+	async createGroup(): Promise<string> {
+		const group: GroupDefinition = {
+			id: this.uniqueGroupId('my-group'),
+			name: 'New group',
+			builtIn: false,
+			extends: [BASE_PACK_ID],
+			rollupThreshold: DEFAULT_ROLLUP_THRESHOLD,
+			checks: {},
+		};
+		this.userGroups.push(group);
+		this.settings.activeProfile = group.id;
+		await this.saveUserGroups();
+		await this.saveSettings();
+		this.applyConfigChange();
+		return group.id;
+	}
+
+	// Duplicate any group (a starter or a user group) into a new editable user group
+	// and make it active. This is how a read-only starter is customized. Returns the
+	// new id, or null if the source id resolves to nothing.
+	async duplicateGroup(sourceId: string): Promise<string | null> {
+		const source = findGroup(sourceId, this.userGroups);
+		if (!source) {
+			return null;
+		}
+		const copy: GroupDefinition = {
+			id: this.uniqueGroupId(source.id),
+			name: `${source.name} (copy)`,
+			builtIn: false,
+			extends: [...source.extends],
+			rollupThreshold: source.rollupThreshold,
+			checks: structuredClone(source.checks),
+		};
+		this.userGroups.push(copy);
+		this.settings.activeProfile = copy.id;
+		await this.saveUserGroups();
+		await this.saveSettings();
+		this.applyConfigChange();
+		return copy.id;
+	}
+
+	// Delete a user group. A starter is read-only and is never deleted here. If the
+	// deleted group was active, fall back to the devotional starter so the plugin
+	// always has a valid active group.
+	async deleteGroup(id: string): Promise<void> {
+		const index = this.userGroups.findIndex((group) => group.id === id);
+		if (index === -1) {
+			return;
+		}
+		this.userGroups.splice(index, 1);
+		if (this.settings.activeProfile === id) {
+			this.settings.activeProfile = DEFAULT_SETTINGS.activeProfile;
+		}
+		await this.saveUserGroups();
+		await this.saveSettings();
+		this.applyConfigChange();
+	}
+
+	// Apply a mutation to one user group and persist it. A starter cannot be edited,
+	// so a non-user id is a no-op. Re-analyzes, which matters when the edited group
+	// is the active one.
+	private async mutateGroup(
+		id: string,
+		mutate: (group: GroupDefinition) => void,
+	): Promise<void> {
+		const group = this.userGroupById(id);
+		if (!group) {
+			return;
+		}
+		mutate(group);
+		await this.saveUserGroups();
+		this.applyConfigChange();
+	}
+
+	// Rename a user group.
+	async renameGroup(id: string, name: string): Promise<void> {
+		await this.mutateGroup(id, (group) => {
+			group.name = name;
+		});
+	}
+
+	// Set a user group's roll-up threshold.
+	async setGroupRollupThreshold(
+		id: string,
+		threshold: number,
+	): Promise<void> {
+		await this.mutateGroup(id, (group) => {
+			group.rollupThreshold = threshold;
+		});
+	}
+
+	// Turn the scripture pack on or off for a user group. The base pack is always
+	// present, so only the scripture pack is toggled here.
+	async setGroupScripture(id: string, include: boolean): Promise<void> {
+		await this.mutateGroup(id, (group) => {
+			const packs = new Set(group.extends);
+			if (include) {
+				packs.add(SCRIPTURE_PACK_ID);
+			} else {
+				packs.delete(SCRIPTURE_PACK_ID);
+			}
+			packs.add(BASE_PACK_ID);
+			group.extends = [...packs];
+		});
+	}
+
+	// A group id not already taken by a starter or a user group, derived from a
+	// base by appending -2, -3, and so on. Keeps a duplicated or migrated group
+	// from colliding with the one it came from.
+	private uniqueGroupId(base: string): string {
+		const taken = (id: string): boolean =>
+			findGroup(id, this.userGroups) !== undefined;
+		if (!taken(base)) {
+			return base;
+		}
+		let n = 2;
+		while (taken(`${base}-${n}`)) {
+			n += 1;
+		}
+		return `${base}-${n}`;
+	}
+
+	// The active group as an editable user group. A read-only starter is forked
+	// into a user copy the first time it is tuned, and that copy becomes active, so
+	// the settings controls always write somewhere editable and a starter is never
+	// mutated. Returns the group object held in `userGroups`, ready to mutate.
+	private ensureEditableActiveGroup(): GroupDefinition {
+		const active = this.activeGroup();
+		if (!active.builtIn) {
+			return active;
+		}
+		const copy: GroupDefinition = {
+			id: this.uniqueGroupId(active.id),
+			name: `${active.name} (my copy)`,
+			builtIn: false,
+			extends: [...active.extends],
+			rollupThreshold: active.rollupThreshold,
+			checks: structuredClone(active.checks),
+		};
+		this.userGroups.push(copy);
+		this.settings.activeProfile = copy.id;
+		new Notice(`Plumbline: made an editable copy of ${active.name}.`);
+		return copy;
+	}
+
+	// Apply a mutation to one check's membership in the active group, forking a
+	// starter first if needed, dropping a membership that ends up empty so the file
+	// stays sparse, then persisting and re-analyzing. The mutator clears a field by
+	// deleting it, so there is no "set to undefined" case to reason about.
+	private async mutateMembership(
+		slug: string,
+		mutate: (membership: CheckMembership) => void,
+	): Promise<void> {
+		const group = this.ensureEditableActiveGroup();
+		const next: CheckMembership = { ...group.checks[slug] };
+		mutate(next);
+		if (Object.keys(next).length === 0) {
+			delete group.checks[slug];
+		} else {
+			group.checks[slug] = next;
+		}
+		await this.saveUserGroups();
+		await this.saveSettings();
+		this.applyConfigChange();
+	}
+
+	// One-time migration of phase-2's flat tuning (rule toggles, severity
+	// overrides, roll-up threshold, confidence) from .plumbline/config.json into an
+	// editable group. Before groups, those lived in the vault config; the group
+	// model makes the active group the one place tuning lives. Runs only when there
+	// are no user groups yet, so it forks the active starter once and never again,
+	// and never fires for a vault that has already moved to groups.
+	private async migrateFlatTuning(): Promise<void> {
+		if (this.userGroups.length > 0) {
+			return;
+		}
+		if (!hasFlatTuning(this.vaultConfig)) {
+			return;
+		}
+		try {
+			const starter = this.activeGroup();
+			const migrated = buildMigratedGroup(
+				starter,
+				this.vaultConfig,
+				this.uniqueGroupId(starter.id),
+			);
+			this.userGroups.push(migrated);
+			this.settings.activeProfile = migrated.id;
+			await this.writeUserGroups();
+			await this.saveSettings();
+			// Clear the migrated fields from the vault config so they are not
+			// applied twice, once by the group and once by the flat layer, and so a
+			// later membership edit is authoritative. Hand-authored message and
+			// phrase overrides and custom rules are left untouched.
+			await this.clearMigratedFlatTuning();
+		} catch (err) {
+			console.error(err);
+		}
+	}
+
+	// Remove the tuning migrateFlatTuning moved into a group from config.json,
+	// keeping everything else the file holds. A severity-only override entry is
+	// dropped whole; an entry that also carries a message or phrases keeps those.
+	private async clearMigratedFlatTuning(): Promise<void> {
+		await this.writeConfig((raw, fresh) => {
+			delete raw.disabledRules;
+			delete raw.rollupThreshold;
+			delete raw.confidence;
+			const overrides: Record<string, unknown> = {};
+			for (const [slug, ov] of Object.entries(fresh.overrides)) {
+				const rest: Record<string, unknown> = { ...ov };
+				delete rest.severity;
+				if (Object.keys(rest).length > 0) {
+					overrides[slug] = rest;
+				}
+			}
+			raw.overrides = overrides;
+		});
+	}
+
+	// The built-in rules for the active group, mechanical and heuristic, each paired
+	// with the group's per-check tuning: whether it is on and its effective
+	// severity (the membership override, or the check's default). The settings tab
+	// renders this. Reads the active group's membership, not the flat vault config,
+	// since the group is where tuning lives now.
+	profileRuleStates(): RuleState[] {
+		const group = this.activeGroup();
+		return profileRuleInfos(
+			this.settings.activeProfile,
+			this.userGroups,
+		).map((info) => {
+			const membership = group.checks[info.slug];
+			return {
+				...info,
+				enabled: membership?.enabled !== false,
+				defaultSeverity: info.severity,
+				severity: membership?.severity ?? info.severity,
+			};
+		});
+	}
+
+	// The roll-up threshold in effect: the active group's. The settings tab shows
+	// this and lets the writer change it without hand-editing a file.
 	currentRollupThreshold(): number {
-		return this.vaultConfig.rollupThreshold ?? DEFAULT_ROLLUP_THRESHOLD;
+		return this.activeGroup().rollupThreshold;
 	}
 
 	// Add or remove an id from a disabled list, returning the new array. The one
@@ -360,24 +674,32 @@ export default class PlumblinePlugin extends Plugin {
 		return [...set];
 	}
 
-	// Apply a single on/off toggle to one of the vault config's disabled lists,
+	// Apply a comment-span-kind toggle to the vault config's disabled-span list,
 	// serialized through the save queue, then re-analyze so it shows in the editor,
-	// panel, and status bar at once.
-	private async persistToggle(
-		field: 'disabledRules' | 'disabledSpanKinds',
-		id: string,
+	// panel, and status bar at once. Rule enable/disable lives on the active group
+	// now, not in the vault config, so this serves the span toggles alone.
+	private async persistSpanKindToggle(
+		kind: string,
 		enabled: boolean,
 	): Promise<void> {
 		this.saveQueue = this.saveQueue.then(() =>
-			this.writeToggle(field, id, enabled),
+			this.writeSpanKindToggle(kind, enabled),
 		);
 		await this.saveQueue;
 		this.applyConfigChange();
 	}
 
-	// Toggle one built-in rule on or off in the vault config's disabled list.
+	// Toggle one built-in rule on or off for the active group. On is the default,
+	// so an enabled check stores nothing and only "off" is recorded, which keeps
+	// the group definition sparse.
 	async setRuleEnabled(slug: string, enabled: boolean): Promise<void> {
-		await this.persistToggle('disabledRules', slug, enabled);
+		await this.mutateMembership(slug, (membership) => {
+			if (enabled) {
+				delete membership.enabled;
+			} else {
+				membership.enabled = false;
+			}
+		});
 	}
 
 	// The toggleable comment span kinds, each paired with whether masking is on.
@@ -392,47 +714,32 @@ export default class PlumblinePlugin extends Plugin {
 
 	// Toggle masking of one comment kind on or off.
 	async setSpanKindEnabled(kind: string, enabled: boolean): Promise<void> {
-		await this.persistToggle('disabledSpanKinds', kind, enabled);
+		await this.persistSpanKindToggle(kind, enabled);
 	}
 
-	// Set or clear a rule's severity override in the vault config. Passing the
-	// rule's own default clears the override, so the file never accumulates a
-	// no-op entry; any other value writes it. Re-analyzes after, so the change
-	// shows in the editor, panel, and status bar at once.
+	// Set or clear a rule's severity override in the active group. Passing the
+	// rule's own default (null from the settings tab) clears the override, so the
+	// group never accumulates a no-op entry; any other value writes it.
 	async setRuleSeverity(
 		slug: string,
 		severity: Severity | null,
 	): Promise<void> {
-		this.saveQueue = this.saveQueue.then(() =>
-			this.writeConfig((raw, fresh) => {
-				const overrides = { ...fresh.overrides };
-				if (severity === null) {
-					const rest = { ...overrides[slug] };
-					delete rest.severity;
-					if (Object.keys(rest).length === 0) {
-						delete overrides[slug];
-					} else {
-						overrides[slug] = rest;
-					}
-				} else {
-					overrides[slug] = { ...overrides[slug], severity };
-				}
-				raw.overrides = overrides;
-			}),
-		);
-		await this.saveQueue;
-		this.applyConfigChange();
+		await this.mutateMembership(slug, (membership) => {
+			if (severity === null) {
+				delete membership.severity;
+			} else {
+				membership.severity = severity;
+			}
+		});
 	}
 
-	// Set the roll-up threshold in the vault config, then re-analyze. The value
-	// comes from a bounded settings control; a bad hand-edit is clamped on read.
+	// Set the roll-up threshold on the active group, forking a starter first if
+	// needed, then re-analyze. A bad value is clamped when the group resolves.
 	async setRollupThreshold(threshold: number): Promise<void> {
-		this.saveQueue = this.saveQueue.then(() =>
-			this.writeConfig((raw) => {
-				raw.rollupThreshold = threshold;
-			}),
-		);
-		await this.saveQueue;
+		const group = this.ensureEditableActiveGroup();
+		group.rollupThreshold = threshold;
+		await this.saveUserGroups();
+		await this.saveSettings();
 		this.applyConfigChange();
 	}
 
@@ -486,18 +793,18 @@ export default class PlumblinePlugin extends Plugin {
 		}
 	}
 
-	// Toggle one id in a disabled list, applied to the freshly read list.
-	private async writeToggle(
-		field: 'disabledRules' | 'disabledSpanKinds',
-		id: string,
+	// Toggle one comment-span kind in the disabled-span list, applied to the freshly
+	// read list so a concurrent edit elsewhere in the file is preserved.
+	private async writeSpanKindToggle(
+		kind: string,
 		enabled: boolean,
 	): Promise<void> {
 		await this.writeConfig((raw, fresh) => {
-			const current =
-				field === 'disabledRules'
-					? fresh.disabledRules
-					: fresh.disabledSpanKinds;
-			raw[field] = PlumblinePlugin.toggledList(current, id, enabled);
+			raw.disabledSpanKinds = PlumblinePlugin.toggledList(
+				fresh.disabledSpanKinds,
+				kind,
+				enabled,
+			);
 		});
 	}
 

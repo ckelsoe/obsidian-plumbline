@@ -34,14 +34,16 @@ export const EMPTY_VAULT_CONFIG: VaultConfig = {
 	overrides: {},
 };
 
-function asStringArray(value: unknown): string[] {
+// Exported so the group store (group-store.ts) validates untrusted vault files
+// with the same primitives, rather than growing a second copy of each check.
+export function asStringArray(value: unknown): string[] {
 	if (!Array.isArray(value)) {
 		return [];
 	}
 	return value.filter((v): v is string => typeof v === 'string');
 }
 
-function asSeverity(value: unknown): Severity | undefined {
+export function asSeverity(value: unknown): Severity | undefined {
 	if (value === 'error' || value === 'warning' || value === 'suggestion') {
 		return value;
 	}

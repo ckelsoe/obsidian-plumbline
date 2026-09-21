@@ -1,12 +1,17 @@
 import {
 	App,
+	Notice,
 	PluginSettingTab,
 	Setting,
 	SettingDefinitionItem,
+	SettingDefinitionList,
+	SettingPage,
 } from 'obsidian';
 import type PlumblinePlugin from './main';
 import type { RuleState } from './main';
-import { STARTER_GROUPS } from './engine/groups';
+import { allGroups } from './engine/group-store';
+import type { GroupDefinition } from './engine/groups';
+import { SCRIPTURE_PACK_ID } from './engine/scripture';
 import type { Severity } from './engine/types';
 
 // Community discussion for this plugin. This must stay a never-expiring
@@ -17,19 +22,11 @@ const DISCORD_URL = 'https://discord.gg/gd6tKJDPj4';
 
 // The comment-span toggles are keyed with this prefix so getControlValue and
 // setControlValue can route them to the vault config instead of plugin settings.
-// The rule rows are rendered imperatively (renderRuleRow) and write to the vault
-// config directly, so they need no such key. The roll-up control uses the plain
-// 'rollup' key, routed the same way.
+// The rule rows are rendered imperatively (renderRuleRow) and write to the active
+// group's membership, so they need no such key. The roll-up control uses the plain
+// 'rollup' key, routed to the active group.
 const SPAN_KEY_PREFIX = 'span:';
 const ROLLUP_KEY = 'rollup';
-
-// The built-in starter groups the dropdown offers, derived from the group data so
-// the labels never drift from the definitions. Each is a read-only example a
-// writer clones and tunes for their own work. See config-model.md.
-const PROFILE_OPTIONS: Record<string, string> = {};
-for (const group of STARTER_GROUPS) {
-	PROFILE_OPTIONS[group.id] = group.name;
-}
 
 // Turn a rule slug into a readable, sentence-case label ('reader-direction' ->
 // 'Reader direction') for the settings list.
@@ -50,16 +47,26 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		return [
 			{
 				type: 'group',
-				heading: 'Writing profile',
+				heading: 'Writing group',
 				items: [
 					{
-						name: 'Active profile',
-						desc: 'The type of writing to lint for. The profile selects which rule packs are on and how they are tuned. A note can override this with a plumbline-profile key in its frontmatter.',
+						name: 'Active group',
+						desc: 'The group of checks to run on your notes. A group turns a set of checks on and tunes them. The two starters are read-only worked examples; editing one makes an editable copy. A note can override this with a plumbline-profile key in its frontmatter.',
 						control: {
 							type: 'dropdown',
 							key: 'activeProfile',
-							options: PROFILE_OPTIONS,
+							options: this.groupOptions(),
 						},
+					},
+					{
+						type: 'page',
+						name: 'Manage groups',
+						desc: 'Create, rename, duplicate, and delete writing groups. The two starters are read-only; duplicate one to customize it.',
+						displayValue: () => this.describeGroupCount(),
+						items: [
+							this.buildUserGroupList(),
+							this.buildStarterGroupList(),
+						],
 					},
 				],
 			},
@@ -139,8 +146,10 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		];
 	}
 
-	// Binds declarative control definitions to their store. A `rule:` key reads
-	// from the vault config's disabled set; every other key is a plugin setting.
+	// Binds declarative controls to their store. A span: key routes to the vault
+	// config's disabled-span set; the roll-up key routes to the active group; every
+	// other key is a plugin setting. Rule rows are rendered (renderRuleRow), not
+	// declarative controls, so they do not pass through here.
 	getControlValue(key: string): unknown {
 		if (key.startsWith(SPAN_KEY_PREFIX)) {
 			const kind = key.slice(SPAN_KEY_PREFIX.length);
@@ -163,7 +172,9 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			return;
 		}
 		if (key === ROLLUP_KEY) {
-			await this.plugin.setRollupThreshold(Number(value));
+			await this.withActiveGroupRerender(() =>
+				this.plugin.setRollupThreshold(Number(value)),
+			);
 			return;
 		}
 		(this.plugin.settings as unknown as Record<string, unknown>)[key] =
@@ -184,9 +195,113 @@ export class PlumblineSettingTab extends PluginSettingTab {
 		}
 	}
 
+	// Run a tuning change, then re-render the whole tab if it switched the active
+	// group. Tuning a read-only starter forks an editable copy and makes it active,
+	// so the dropdown and the rule rows below would otherwise show the old group
+	// until the tab was reopened.
+	private async withActiveGroupRerender(
+		change: () => Promise<void>,
+	): Promise<void> {
+		const before = this.plugin.settings.activeProfile;
+		await change();
+		if (this.plugin.settings.activeProfile !== before) {
+			this.update();
+		}
+	}
+
+	// The active-group dropdown options: every group the user can pick, starters
+	// first, keyed by id. Built from live data so a new or renamed group shows
+	// without a stale label.
+	private groupOptions(): Record<string, string> {
+		const options: Record<string, string> = {};
+		for (const group of allGroups(this.plugin.groups())) {
+			options[group.id] = group.name;
+		}
+		return options;
+	}
+
+	// The built-in starter groups (base only, so no user groups are passed).
+	private starterGroups(): GroupDefinition[] {
+		return allGroups([]);
+	}
+
+	// One-line summary of a group for its list row: which packs it draws from and
+	// how many checks it tunes away from the defaults.
+	private describeGroup(group: GroupDefinition): string {
+		const packs = group.extends.includes(SCRIPTURE_PACK_ID)
+			? 'Base and scripture packs'
+			: 'Base pack';
+		const tuned = Object.keys(group.checks).length;
+		return tuned === 0 ? packs : `${packs}, ${tuned} tuned`;
+	}
+
+	// Count shown on the "Manage groups" entry so the state reads without opening it.
+	private describeGroupCount(): string {
+		const starters = this.starterGroups().length;
+		const yours = this.plugin.groups().length;
+		const yoursLabel =
+			yours === 0 ? 'none of your own' : `${yours} of your own`;
+		return `${starters} starters, ${yoursLabel}`;
+	}
+
+	// The user's editable groups: each opens an editor, with delete on the row and
+	// a New group affordance. The delete index is into this same filtered list.
+	private buildUserGroupList(): SettingDefinitionList {
+		const groups = this.plugin.groups();
+		return {
+			type: 'list',
+			heading: 'Your groups',
+			emptyState:
+				'No groups of your own yet. Create one, or duplicate a starter below.',
+			onDelete: (index: number) => {
+				const group = this.plugin.groups()[index];
+				if (!group) {
+					return;
+				}
+				void (async () => {
+					await this.plugin.deleteGroup(group.id);
+					new Notice(`Plumbline: deleted ${group.name}.`);
+					this.update();
+				})();
+			},
+			addItem: {
+				name: 'New group',
+				action: () => {
+					void (async () => {
+						await this.plugin.createGroup();
+						this.update();
+					})();
+				},
+			},
+			items: groups.map((group) => ({
+				type: 'page' as const,
+				name: group.name,
+				desc: this.describeGroup(group),
+				page: () => new GroupEditorPage(this, group.id),
+			})),
+		};
+	}
+
+	// The read-only starter groups: each opens the editor, which offers Duplicate
+	// and leaves the fields locked. No delete affordance, since a starter cannot be
+	// removed.
+	private buildStarterGroupList(): SettingDefinitionList {
+		return {
+			type: 'list',
+			heading: 'Starter groups',
+			items: this.starterGroups().map((group) => ({
+				type: 'page' as const,
+				name: group.name,
+				desc: this.describeGroup(group),
+				page: () => new GroupEditorPage(this, group.id),
+			})),
+		};
+	}
+
 	// One rule row: name and message, a severity dropdown, and an on/off toggle,
-	// both writing straight to the vault config. Choosing a rule's own default
-	// severity clears the override rather than storing a no-op entry.
+	// both writing to the active group's membership (forking a read-only starter
+	// first). Choosing a rule's own default severity clears the override rather
+	// than storing a no-op entry.
 	private renderRuleRow(setting: Setting, state: RuleState): void {
 		setting.setName(prettifySlug(state.slug)).setDesc(state.message);
 		setting.addDropdown((dropdown) => {
@@ -197,15 +312,21 @@ export class PlumblineSettingTab extends PluginSettingTab {
 				.setValue(state.severity)
 				.onChange((value) => {
 					const severity = value as Severity;
-					void this.plugin.setRuleSeverity(
-						state.slug,
-						severity === state.defaultSeverity ? null : severity,
+					void this.withActiveGroupRerender(() =>
+						this.plugin.setRuleSeverity(
+							state.slug,
+							severity === state.defaultSeverity
+								? null
+								: severity,
+						),
 					);
 				});
 		});
 		setting.addToggle((toggle) => {
 			toggle.setValue(state.enabled).onChange((value) => {
-				void this.plugin.setRuleEnabled(state.slug, value);
+				void this.withActiveGroupRerender(() =>
+					this.plugin.setRuleEnabled(state.slug, value),
+				);
 			});
 		});
 	}
@@ -239,5 +360,126 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			'Report issues',
 			'https://github.com/ckelsoe/obsidian-plumbline/issues',
 		);
+	}
+}
+
+// A navigable sub-page for one group: rename, choose its packs, set its roll-up
+// threshold, and duplicate it. A read-only starter shows the same fields locked,
+// with Duplicate as the way to get an editable copy. Deletion is the list's job
+// (SettingPage has no back-navigation), so there is no delete button here.
+class GroupEditorPage extends SettingPage {
+	private tab: PlumblineSettingTab;
+	private groupId: string;
+
+	constructor(tab: PlumblineSettingTab, groupId: string) {
+		super();
+		this.tab = tab;
+		this.groupId = groupId;
+		this.title = this.group()?.name ?? 'Group';
+	}
+
+	private get plugin(): PlumblinePlugin {
+		return this.tab.plugin;
+	}
+
+	// The group this page edits, resolved fresh so a rename or a duplicate made
+	// elsewhere is reflected. Undefined if it was deleted while the page was open.
+	private group(): GroupDefinition | undefined {
+		return allGroups(this.plugin.groups()).find(
+			(group) => group.id === this.groupId,
+		);
+	}
+
+	// Rebuild the parent tab on the way out, so a rename or a new duplicate shows
+	// in the list and the dropdown.
+	hide(): void {
+		super.hide();
+		this.tab.update();
+	}
+
+	display(): void {
+		const editor = this.containerEl;
+		editor.empty();
+		const group = this.group();
+		if (!group) {
+			editor.createEl('p', {
+				text: 'This group no longer exists.',
+			});
+			return;
+		}
+		const readOnly = group.builtIn;
+
+		if (readOnly) {
+			new Setting(editor)
+				.setName('Read-only starter')
+				.setDesc(
+					'Starter groups are worked examples. Duplicate this one to get an editable copy.',
+				);
+		}
+
+		new Setting(editor).setName('Name').addText((text) =>
+			text
+				.setValue(group.name)
+				.setDisabled(readOnly)
+				.onChange((value) => {
+					this.title = value || 'Group';
+					void this.plugin.renameGroup(group.id, value);
+				}),
+		);
+
+		new Setting(editor)
+			.setName('Include scripture checks')
+			.setDesc(
+				'Verse caps, blended quotation, verbatim scripture, and the devotional-register check.',
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(group.extends.includes(SCRIPTURE_PACK_ID))
+					.setDisabled(readOnly)
+					.onChange((value) => {
+						void this.plugin.setGroupScripture(group.id, value);
+					}),
+			);
+
+		new Setting(editor)
+			.setName('Roll up a repeated check after')
+			.setDesc(
+				'When one check fires more than this many times in a note, its hits collapse to a single row.',
+			)
+			.addDropdown((dropdown) => {
+				for (let hits = 1; hits <= 8; hits++) {
+					dropdown.addOption(
+						String(hits),
+						`${hits} hit${hits === 1 ? '' : 's'}`,
+					);
+				}
+				dropdown
+					.setValue(String(group.rollupThreshold))
+					.setDisabled(readOnly)
+					.onChange((value) => {
+						void this.plugin.setGroupRollupThreshold(
+							group.id,
+							Number(value),
+						);
+					});
+			});
+
+		new Setting(editor)
+			.setName('Duplicate')
+			.setDesc(
+				'Make an editable copy of this group and switch to it. Go back to see it in the list.',
+			)
+			.addButton((button) =>
+				button.setButtonText('Duplicate').onClick(() => {
+					void (async () => {
+						const id = await this.plugin.duplicateGroup(group.id);
+						if (id) {
+							new Notice(
+								`Plumbline: copied ${group.name}. It is now active.`,
+							);
+						}
+					})();
+				}),
+			);
 	}
 }
