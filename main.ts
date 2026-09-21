@@ -70,16 +70,19 @@ import {
 	hasFlatTuning,
 	buildMigratedGroup,
 } from './engine/group-store';
+import { BASE_PACK_ID } from './engine/packs';
+import { SCRIPTURE_PACK_ID } from './engine/scripture';
+import { DEFAULT_ROLLUP_THRESHOLD } from './engine/rollup';
 
-// One built-in rule (mechanical or heuristic), paired with whether the vault
-// config currently has it on. Drives the settings list so a rule can be toggled
+// One built-in rule (mechanical or heuristic), paired with the active group's
+// tuning for it. Drives the settings list so a rule can be toggled and retuned
 // without hand-editing JSON.
 export interface RuleState extends RuleInfo {
 	enabled: boolean;
-	// `severity` (from RuleInfo) carries the EFFECTIVE severity, the vault
-	// override if there is one or the rule's default otherwise. `defaultSeverity`
-	// keeps the record's own value, so the settings tab can tell when a row is
-	// overridden and offer a reset to the default.
+	// `severity` (from RuleInfo) carries the EFFECTIVE severity: the active group's
+	// membership override if there is one, or the rule's default otherwise.
+	// `defaultSeverity` keeps the record's own value, so the settings tab can tell
+	// when a row is overridden and offer a reset to the default.
 	defaultSeverity: Severity;
 }
 
@@ -394,10 +397,124 @@ export default class PlumblinePlugin extends Plugin {
 		);
 	}
 
-	// Every group the user can pick, starters first, so the settings dropdown and
-	// the group list read from one source.
+	// The user's own groups (not the starters). The settings tab combines these
+	// with the built-in starters through allGroups() for the dropdown and the list.
 	groups(): GroupDefinition[] {
 		return [...this.userGroups];
+	}
+
+	// One user group by id, the mutable object held in userGroups, or undefined.
+	// Starters are read-only and are never returned here.
+	private userGroupById(id: string): GroupDefinition | undefined {
+		return this.userGroups.find((group) => group.id === id);
+	}
+
+	// Create a new, empty base-only user group and make it active. Returns its id so
+	// the settings tab can open its editor.
+	async createGroup(): Promise<string> {
+		const group: GroupDefinition = {
+			id: this.uniqueGroupId('my-group'),
+			name: 'New group',
+			builtIn: false,
+			extends: [BASE_PACK_ID],
+			rollupThreshold: DEFAULT_ROLLUP_THRESHOLD,
+			checks: {},
+		};
+		this.userGroups.push(group);
+		this.settings.activeProfile = group.id;
+		await this.saveUserGroups();
+		await this.saveSettings();
+		this.applyConfigChange();
+		return group.id;
+	}
+
+	// Duplicate any group (a starter or a user group) into a new editable user group
+	// and make it active. This is how a read-only starter is customized. Returns the
+	// new id, or null if the source id resolves to nothing.
+	async duplicateGroup(sourceId: string): Promise<string | null> {
+		const source = findGroup(sourceId, this.userGroups);
+		if (!source) {
+			return null;
+		}
+		const copy: GroupDefinition = {
+			id: this.uniqueGroupId(source.id),
+			name: `${source.name} (copy)`,
+			builtIn: false,
+			extends: [...source.extends],
+			rollupThreshold: source.rollupThreshold,
+			checks: structuredClone(source.checks),
+		};
+		this.userGroups.push(copy);
+		this.settings.activeProfile = copy.id;
+		await this.saveUserGroups();
+		await this.saveSettings();
+		this.applyConfigChange();
+		return copy.id;
+	}
+
+	// Delete a user group. A starter is read-only and is never deleted here. If the
+	// deleted group was active, fall back to the devotional starter so the plugin
+	// always has a valid active group.
+	async deleteGroup(id: string): Promise<void> {
+		const index = this.userGroups.findIndex((group) => group.id === id);
+		if (index === -1) {
+			return;
+		}
+		this.userGroups.splice(index, 1);
+		if (this.settings.activeProfile === id) {
+			this.settings.activeProfile = DEFAULT_SETTINGS.activeProfile;
+		}
+		await this.saveUserGroups();
+		await this.saveSettings();
+		this.applyConfigChange();
+	}
+
+	// Apply a mutation to one user group and persist it. A starter cannot be edited,
+	// so a non-user id is a no-op. Re-analyzes, which matters when the edited group
+	// is the active one.
+	private async mutateGroup(
+		id: string,
+		mutate: (group: GroupDefinition) => void,
+	): Promise<void> {
+		const group = this.userGroupById(id);
+		if (!group) {
+			return;
+		}
+		mutate(group);
+		await this.saveUserGroups();
+		this.applyConfigChange();
+	}
+
+	// Rename a user group.
+	async renameGroup(id: string, name: string): Promise<void> {
+		await this.mutateGroup(id, (group) => {
+			group.name = name;
+		});
+	}
+
+	// Set a user group's roll-up threshold.
+	async setGroupRollupThreshold(
+		id: string,
+		threshold: number,
+	): Promise<void> {
+		await this.mutateGroup(id, (group) => {
+			group.rollupThreshold = threshold;
+		});
+	}
+
+	// Turn the scripture pack on or off for a user group. The base pack is always
+	// present, so only the scripture pack is toggled here.
+	async setGroupScripture(id: string, include: boolean): Promise<void> {
+		await this.mutateGroup(id, (group) => {
+			const packs = new Set(group.extends);
+			if (include) {
+				packs.add(SCRIPTURE_PACK_ID);
+			} else {
+				packs.delete(SCRIPTURE_PACK_ID);
+			}
+			packs.add(BASE_PACK_ID);
+			group.extends = [...packs];
+		});
 	}
 
 	// A group id not already taken by a starter or a user group, derived from a
