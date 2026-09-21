@@ -4,12 +4,12 @@ import { HEURISTIC_RULES } from './heuristics';
 import { VaultConfig, mergeRules } from './vault-config';
 import {
 	GroupDefinition,
-	starterGroup,
 	fallbackGroup,
 	resolveGroup,
 	groupPackRules,
 	groupSpanKinds,
 } from './groups';
+import { findGroup } from './group-store';
 
 // This module turns a group id into the ResolvedConfig the engine consumes. The
 // group model (groups.ts) supplies which packs and checks are active; the vault
@@ -48,18 +48,26 @@ export const COMMENT_SPAN_KINDS: SpanKindInfo[] = [
 	},
 ];
 
-// The group behind a group id, with the devotional starter as the fallback for an
-// unknown id so a stale note or a fresh install still resolves to something
-// sensible. The parameter is named profileId because the note-level selector is
-// still spelled `plumbline-profile`; the value it carries is a group id.
-function groupFor(profileId: string): GroupDefinition {
-	return starterGroup(profileId) ?? fallbackGroup();
+// The group behind a group id, across the built-in starters and the user's own
+// groups, with the base-only group as the fallback for an unknown id so a stale
+// note or a fresh install still resolves to something sensible. The parameter is
+// named profileId because the note-level selector is still spelled
+// `plumbline-profile`; the value it carries is a group id. `userGroups` is the
+// vault's groups.json (empty for a caller that only knows the built-ins).
+function groupFor(
+	profileId: string,
+	userGroups: readonly GroupDefinition[] = [],
+): GroupDefinition {
+	return findGroup(profileId, userGroups) ?? fallbackGroup();
 }
 
 // The built-in mechanical rules a group activates, before any vault config is
 // applied. Its own step rather than being inlined into resolveConfig.
-export function profileRules(profileId: string): Rule[] {
-	return groupPackRules(groupFor(profileId));
+export function profileRules(
+	profileId: string,
+	userGroups: readonly GroupDefinition[] = [],
+): Rule[] {
+	return groupPackRules(groupFor(profileId, userGroups));
 }
 
 function toRuleInfo(rule: RuleInfo): RuleInfo {
@@ -75,17 +83,23 @@ function toRuleInfo(rule: RuleInfo): RuleInfo {
 // cross-sentence heuristics (which apply to every group). The settings tab lists
 // these, so a heuristic is disableable through the same UI and disabled set as a
 // phrase rule.
-export function profileRuleInfos(profileId: string): RuleInfo[] {
+export function profileRuleInfos(
+	profileId: string,
+	userGroups: readonly GroupDefinition[] = [],
+): RuleInfo[] {
 	return [
-		...profileRules(profileId).map(toRuleInfo),
+		...profileRules(profileId, userGroups).map(toRuleInfo),
 		...HEURISTIC_RULES.map(toRuleInfo),
 	];
 }
 
 // The protected-span kinds a group activates. Every group masks the base kinds;
 // the devotional group also masks quoted verses.
-export function profileSpanKinds(profileId: string): string[] {
-	return groupSpanKinds(groupFor(profileId));
+export function profileSpanKinds(
+	profileId: string,
+	userGroups: readonly GroupDefinition[] = [],
+): string[] {
+	return groupSpanKinds(groupFor(profileId, userGroups));
 }
 
 // Resolve the active group for a group id, then apply the user's vault config
@@ -94,8 +108,9 @@ export function profileSpanKinds(profileId: string): string[] {
 export function resolveConfig(
 	profileId: string,
 	vaultConfig?: VaultConfig,
+	userGroups: readonly GroupDefinition[] = [],
 ): ResolvedConfig {
-	const group = groupFor(profileId);
+	const group = groupFor(profileId, userGroups);
 	const base = resolveGroup(group);
 
 	const disabledKinds = new Set(vaultConfig?.disabledSpanKinds ?? []);
