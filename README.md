@@ -1,35 +1,56 @@
+<!-- slop-check: off (names the AI-tell vocabulary the plugin flags, such as delve and leverage, as examples, and uses the mandated fleet-standard Community section wording) -->
 # Plumbline
 
-[![CI](https://img.shields.io/github/actions/workflow/status/ckelsoe/obsidian-plumbline/ci.yml?branch=main&label=CI&logo=github)](https://github.com/ckelsoe/obsidian-plumbline/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/actions/workflow/status/ckelsoe/obsidian-plumbline/release.yml?label=Release&logo=github)](https://github.com/ckelsoe/obsidian-plumbline/actions/workflows/release.yml) [![GitHub Downloads](https://img.shields.io/github/downloads/ckelsoe/obsidian-plumbline/total?logo=github&label=Downloads)](https://github.com/ckelsoe/obsidian-plumbline/releases) [![GitHub Stars](https://img.shields.io/github/stars/ckelsoe/obsidian-plumbline?style=flat&logo=github&label=Stars)](https://github.com/ckelsoe/obsidian-plumbline) [![Obsidian](https://img.shields.io/badge/Obsidian-v1.5.0%2B-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md) [![License](https://img.shields.io/github/license/ckelsoe/obsidian-plumbline)](https://github.com/ckelsoe/obsidian-plumbline/blob/main/LICENSE) [![Latest Release](https://img.shields.io/github/v/release/ckelsoe/obsidian-plumbline?label=Latest)](https://github.com/ckelsoe/obsidian-plumbline/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/ckelsoe/obsidian-plumbline/ci.yml?branch=main&label=CI&logo=github)](https://github.com/ckelsoe/obsidian-plumbline/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/actions/workflow/status/ckelsoe/obsidian-plumbline/release.yml?label=Release&logo=github)](https://github.com/ckelsoe/obsidian-plumbline/actions/workflows/release.yml) [![GitHub Downloads](https://img.shields.io/github/downloads/ckelsoe/obsidian-plumbline/total?logo=github&label=Downloads)](https://github.com/ckelsoe/obsidian-plumbline/releases) [![GitHub Stars](https://img.shields.io/github/stars/ckelsoe/obsidian-plumbline?style=flat&logo=github&label=Stars)](https://github.com/ckelsoe/obsidian-plumbline) [![Obsidian](https://img.shields.io/badge/Obsidian-v1.13.0%2B-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md) [![License](https://img.shields.io/github/license/ckelsoe/obsidian-plumbline)](https://github.com/ckelsoe/obsidian-plumbline/blob/main/LICENSE) [![Latest Release](https://img.shields.io/github/v/release/ckelsoe/obsidian-plumbline?label=Latest)](https://github.com/ckelsoe/obsidian-plumbline/releases/latest)
 
 Flag AI-shaped writing and check prose rhythm against your own calibrated baseline.
 
+> **Early release, under active development.** Plumbline is usable but young. Expect rough edges, and expect settings and defaults to change between versions. It flags, it never blocks or edits your prose on its own. If you hit a bug or a wrong flag, please [open an issue](https://github.com/ckelsoe/obsidian-plumbline/issues); early reports shape what gets fixed first.
+
+## What it does
+
+Plumbline reads your prose and points at the places that read as machine-written or mechanically uniform. It only reads. Nothing it does changes a note unless you ask.
+
+- **AI-tell checks.** A library of phrase checks (throat-clearing, hollow attribution, flagged register like "delve" and "leverage", summative closers, and more) plus cross-sentence heuristics (a negation set up only to be corrected, a repeated sentence opening, a bare "This shows...").
+- **Prose rhythm.** Burstiness, the variation in sentence length, measured against a calibrated baseline, because human writing varies its sentence length and machine writing tends not to.
+- **It skips what is not yours to edit.** Code, headings, and frontmatter are always protected, so no check fires inside them and they do not skew the rhythm number. Quoted scripture is protected too in a group that draws on the scripture pack, such as the Devotional nonfiction starter.
+- **Three ways to see a finding.** An inline underline on the phrase, a per-paragraph bar in the gutter colored by severity, and a side panel that groups findings by paragraph and ranks them. A strip beside the scrollbar shows where they sit in the whole note.
+- **Groups and a check library.** A group is a named set of checks tuned for a kind of writing. Turn checks on or off, set each one's severity, confidence, and roll-up, and create your own phrase checks. Two read-only starters ship as worked examples to clone.
+- **Per-note control.** Frontmatter and inline directives set a note's group, turn individual checks off, or skip a region entirely.
+- **Readable on the filesystem.** A command writes each note's findings as JSON into `.plumbline/`, so a collaborator or an assistant working on the files sees the same findings you do.
+- **Works with Annoteca.** Turn a finding into a comment thread, and let the underline step aside where a comment already marks the passage. See [docs/annoteca.md](./docs/annoteca.md).
+
 ## Installation
 
-### From Obsidian Community Plugins (recommended)
+Plumbline is **not yet in the Obsidian community store**. While it is in early release, install it one of these two ways. Both need a published release, so if the steps below find nothing, a release has not been cut yet.
 
-1. Open Obsidian settings.
-2. Navigate to **Community plugins**.
-3. Click **Browse**.
-4. Search for **Plumbline**.
-5. Click **Install**, then **Enable**.
+### BRAT (recommended while in early release)
 
-### Manual installation
+BRAT installs and auto-updates a plugin straight from its GitHub releases.
+
+1. Install the **BRAT** plugin from Community plugins.
+2. Open BRAT settings and click **Add beta plugin**.
+3. Enter `https://github.com/ckelsoe/obsidian-plumbline`.
+4. Enable **Plumbline** in Settings, Community plugins.
+
+### Manual
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/ckelsoe/obsidian-plumbline/releases/latest).
 2. Create a folder named `plumbline` in your vault's `.obsidian/plugins/` directory.
-3. Copy the downloaded files into this folder.
-4. Reload Obsidian.
-5. Enable **Plumbline** in Settings → Community plugins.
+3. Copy the three files into it.
+4. Reload Obsidian and enable **Plumbline** in Settings, Community plugins.
 
-### BRAT (optional, for pre-release testing)
+### Community store
 
-BRAT lets power users install pre-release builds before they reach the marketplace.
+Once Plumbline is accepted into the Obsidian community store, you will be able to find it under Settings, Community plugins, Browse, by searching for **Plumbline**. It is not there yet.
 
-1. Install the **BRAT** plugin from Community Plugins.
-2. Open BRAT settings and click **Add Beta Plugin**.
-3. Enter: `https://github.com/ckelsoe/obsidian-plumbline`
-4. Enable **Plumbline** in Settings → Community plugins.
+## Reporting issues and feedback
+
+This is early software and your reports are how it gets better. A [GitHub issue](https://github.com/ckelsoe/obsidian-plumbline/issues) is the best home for a bug, a false flag, or a request, so it can be tracked. For questions and general discussion there is [Discord](https://discord.gg/gd6tKJDPj4). When you report a wrong flag, the note text that triggered it (or a small excerpt) helps a lot.
+
+## Annoteca integration
+
+Plumbline pairs with [Annoteca](https://obsidian.md/plugins?id=annoteca), a commenting plugin for Obsidian. You can promote a finding into an Annoteca comment to discuss or answer it instead of only silencing it, and Plumbline's underline yields to an open comment so two plugins never mark the same passage at once. Full details in [docs/annoteca.md](./docs/annoteca.md).
 
 ## Community
 
