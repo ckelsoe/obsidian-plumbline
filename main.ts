@@ -85,7 +85,7 @@ import {
 } from './engine/group-store';
 import { BASE_PACK_ID, BASE_RULES } from './engine/packs';
 import { SCRIPTURE_PACK_ID, SCRIPTURE_RULES } from './engine/scripture';
-import { DEFAULT_ROLLUP_THRESHOLD } from './engine/rollup';
+import { DEFAULT_ROLLUP_THRESHOLD, CONFIDENCE } from './engine/rollup';
 
 // One check as the settings tab shows it, resolved against the active group: its
 // identity, whether it is on, and the tuning knobs both at their check default and
@@ -1071,6 +1071,15 @@ export default class PlumblinePlugin extends Plugin {
 			category: CUSTOM_PACK_ID,
 			severity: descriptor.defaultSeverity,
 			phrases: [...phrases],
+			// Copy the check's OWN default confidence, not the active group's
+			// per-membership override. That override is group-specific, like
+			// severity and roll-up, and the user re-applies it on the copy; a
+			// duplicate captures the check's definition, not one group's tuning
+			// (roll-up cannot live on a custom check at all, only on a membership).
+			// Written only when non-default, to keep the record sparse.
+			...(descriptor.defaultConfidence !== CONFIDENCE.mechanical
+				? { confidence: descriptor.defaultConfidence }
+				: {}),
 		};
 		this.userChecks.push(copy);
 		await this.saveUserChecks();
