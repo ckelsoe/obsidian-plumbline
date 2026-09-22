@@ -263,6 +263,13 @@ export function resolveGroup(
 		if (membership?.enabled !== true) {
 			continue;
 		}
+		// A custom check with no phrases matches nothing (a check just created and
+		// enabled before any phrase was added). Leave it out rather than carry an
+		// empty rule and record tuning for a check that can produce no findings.
+		// applyRules also skips an empty phrase list, so this is defence in depth.
+		if (rule.phrases.length === 0) {
+			continue;
+		}
 		recordEnabledOverrides(rule.slug, membership);
 		rules.push(
 			membership.severity

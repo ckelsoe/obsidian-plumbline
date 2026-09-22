@@ -252,6 +252,21 @@ describe('resolveGroup: custom checks default off', () => {
 		);
 		expect(resolved.disabledSlugs).not.toContain('corporate-jargon');
 	});
+
+	it('leaves out an enabled custom check that has no phrases', () => {
+		const emptyRule = { ...customRule, slug: 'empty-check', phrases: [] };
+		const tuned: GroupDefinition = {
+			...plain,
+			checks: { 'empty-check': { enabled: true, confidence: 0.5 } },
+		};
+		const resolved = resolveGroup(tuned, [emptyRule]);
+		// A phraseless check matches nothing, so it is not carried into the rules,
+		// and no tuning is recorded for it.
+		expect(resolved.rules.some((r) => r.slug === 'empty-check')).toBe(
+			false,
+		);
+		expect(resolved.confidenceBySlug['empty-check']).toBeUndefined();
+	});
 });
 
 describe('legacy id migration', () => {
