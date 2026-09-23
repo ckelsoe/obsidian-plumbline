@@ -31,7 +31,6 @@
     "**/*.d.ts"
   ],
   "exclude": [
-    "node_modules",
-    "scan-node-shim.d.ts"
+    "node_modules"
   ]
 }

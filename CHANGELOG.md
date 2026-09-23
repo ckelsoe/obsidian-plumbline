@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- A "Scripture folder" setting. "Check quoted scripture" now reads the Bible text from a folder you choose, and the README documents the layout it expects: one folder per translation, one folder per book, one note per chapter, with each verse ending in a `^vN` block ID. Before, the folder was fixed to a layout only the author's vault had, so the check found nothing anywhere else. The translation folder now matches your citation's code whatever its case.
+
+### Changed
+- Until a scripture folder is chosen, "Check quoted scripture" says so instead of reporting that no verse could be found. A vault that used the old fixed `10-bibles` folder needs that folder chosen once in settings.
+- Verse caps leave out the notes in the chosen scripture folder, rather than a fixed `10-bibles` folder.
+
 ## [0.2.0] - 2026-09-23
 
 ### Added

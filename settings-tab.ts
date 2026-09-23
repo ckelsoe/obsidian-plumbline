@@ -151,6 +151,21 @@ export class PlumblineSettingTab extends PluginSettingTab {
 					},
 				})),
 			},
+			{
+				type: 'group',
+				heading: 'Scripture',
+				items: [
+					{
+						name: 'Scripture folder',
+						desc: 'The folder holding the Bible text that "Check quoted scripture" compares your quotes against. Inside it, one folder per translation, then one folder per book named like "19 - Psalms", holding one note per chapter named like "Psalms 23", with each verse ending in a ^v1, ^v2, ... block ID. Leave empty if you do not use this check.',
+						control: {
+							type: 'folder',
+							key: 'scriptureFolder',
+							placeholder: 'Example: Bible',
+						},
+					},
+				],
+			},
 			this.buildActiveRulesList(),
 			{
 				type: 'page',
