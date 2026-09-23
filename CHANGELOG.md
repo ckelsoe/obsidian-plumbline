@@ -8,36 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-23
+
 ### Added
-- Project scaffold from the standard template: build, CI, release, and scorecard tooling.
-- Settings tab with a starter-group selector (Devotional nonfiction and Plain nonfiction) and the standard version and links footer.
 - Writing groups choose which checks run on a note. A group names the packs it draws from and tunes them, and the two starters ship read-only as worked examples to clone. The engine resolves a group into the same per-note config as before, so this is a foundation, not a behaviour change.
 - Set a check's severity and the roll-up threshold from settings, no JSON editing. Each active check row now carries a severity dropdown beside its on/off toggle, and a Volume section sets how many repeats of one check collapse into a single findings row. A per-note override still wins. Choosing a check's own default severity clears the override rather than storing a no-op.
 - Manage your own writing groups. Under "Manage groups" you can create a group, rename it, duplicate one, and delete your own; duplicating a starter is how you customize it. Tuning a read-only starter's checks makes an editable copy and switches to it, so the two starters stay pristine. Your groups live in `.plumbline/groups.json`, so they travel with the vault and can be shared. Check tuning now lives on the active group rather than in one flat file, and any tuning you had saved in `.plumbline/config.json` moves into a group the first time you open the vault.
 - A per-check editor. Each check in the "Active rules" list now opens an editor showing whether it runs, its severity, how much it is trusted (confidence), and when repeats collapse into one row. Each knob inherits the check's own default until you override it, so a group only records what you changed, and the editor lists the groups the check is turned on in. The row itself shows the effective severity, or "Off", so the ruleset still reads at a glance.
 - A check library, with your own checks. Create a phrase check of your own, edit its wording and phrases, and delete it; the library also turns any built-in on or off in the active group and searches the whole set by name or message. A built-in's matching stays locked so an update can improve it without clobbering your edits, but Duplicate makes an editable copy you can change. Your custom checks live in `.plumbline/checks.json` and travel with the vault. A custom check is off in a group until you turn it on.
-- Engine groundwork: pure sentence-rhythm statistics (burstiness) with unit tests.
-- Engine core: the lint() contract plus the base protected-span pass, so code and headings no longer skew the prose metrics.
-- Live rhythm readout: the status bar shows the active note's burstiness as you type, and a command reports the full metrics.
-- Rules as data: the base pack's first mechanical rules flag AI-shaped phrasing over prose, skipping code and quotes, and the status bar shows the flag count for the active note.
-- Scripture pack: inline quoted verses with a citation are detected and protected, so no rule fires inside scripture, and the scripture pack adds a devotional-register rule.
-- Inline diagnostics: flagged phrases are underlined in the editor, with the rule message on hover.
-- Findings panel: a side panel lists every flag in the active note, and clicking one jumps to it in the editor. Open it from the ribbon or the command palette.
-- More base rules: summative-closer and cinematic-opener, plus a longer flagged-vocabulary list.
-- Heuristic cross-sentence rules: negation-assertion (a negation set up only to be corrected) and anaphora (a repeated sentence opening), flagged as suggestions.
-- Flags report: a command writes the active note's findings as JSON into the vault's `.plumbline/` folder, so a collaborator on the filesystem reads the same findings the editor shows.
-- Vault config: a `.plumbline/config.json` file lets you tune the built-in rules and add your own without touching code, reloadable with a command.
-- Scripture usage: citations are parsed and counted per translation, shown in the report and a command. This is the foundation for the copyright verse caps.
-- Verbatim scripture check: a command compares each quoted verse against the vault's Bible corpus and reports possible mismatches, skipping verses it cannot find in the corpus.
-- Verse caps: a command aggregates distinct quoted verses per translation across the vault and flags any translation over its copyright cap.
-- More base rules: hollow-attribution, placeholder-memory, self-rating, trailing-participial (comma-prefixed participles).
-- Two more heuristics: rhetorical-pivot (an application question like "But what does this mean for us today?") and demonstrative-opener (a bare "This shows..." with no noun).
-- Structural rules over a new paragraph pass: transitional-stacking (a paragraph-initial "However,"), formatting-tells (consecutive bold-led paragraphs), emphasis-fragment (a whole-sentence fragment like "Full stop.").
-- Judgment-tier notes (suggestions): personal-claims-vague flags a first-person claim carrying no specific, and anchor-test flags an abstract sentence with no concrete particular.
-- AI disclosure: a command reads the active note's `provenance` frontmatter (cold, AI-edited, or AI-drafted) and reports the Amazon KDP disclosure it requires.
 - Rule toggles in settings: the settings tab lists every built-in rule for the active group, both the mechanical phrase rules and the cross-sentence heuristics, each with an on/off switch, so the ruleset is visible and adjustable without hand-editing `.plumbline/config.json`. A toggle rewrites only the disabled list; the file is re-read first, so any hand-authored overrides, custom rules, or edits made since load are preserved.
-
-### Added
 - The findings panel is organised by paragraph. Each paragraph you have flagged gets its own section with a one-line count, the rules worth acting on listed under it in order, and suggestions collapsed into a single row you can open. A rule that fired several times in a paragraph shows the count and expands to every place it fired, so you can step through them instead of only jumping to the first. Long lists cap at 25 rows with a button that says how many more there are.
 - Findings are grouped and ranked. A rule that fires again and again through a chapter now reports as one row carrying every place it fired, instead of one row per hit, and the list is ordered by how much each rule is worth your attention rather than by where it appears. Measured over 25 real chapters: 297 raw hits became 93 rows, and the worst chapter went from 24 hits to 5 rows. The ordering weighs how severe a rule is, how often it fired, and how often that kind of rule is right, so a single misquoted verse outranks fifteen notes about vague phrasing. Both the grouping threshold and the per-rule weighting are tunable in `.plumbline/config.json`.
 - A severity bar in the editor gutter. Each paragraph carrying findings gets a colored bar beside it, in the color of the worst finding in that paragraph, and the bar is as tall as the paragraph, so a long stretch of flagged prose reads as a long bar. Hovering it gives a one-line count, for example "35 findings in this paragraph: 27 warnings, 8 suggestions". The bar points at a paragraph, never at a phrase, which is what the editor's gutter can address; the underline and the findings panel are where a phrase is located.
@@ -69,3 +48,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A flagged phrase shows its rule message in a hover popup, in place of the easy-to-miss native title tooltip. The popup is themed to the active Obsidian theme, so the message is legible on a dark background rather than sitting in a low-contrast light box, it is a readable width, each finding is labeled with its severity, and several findings on the same text read as separate, divided entries. It stays put while the pointer rests on the word. A profile switch or rule toggle refreshes every open editor at once.
 - Comments are no longer linted by default: HTML comments, including Annoteca's `<!-- annoteca/... -->` markers, are masked like code and headings, so no rule fires and no metric counts inside comment text. Two settings toggles, both on by default, control this: "Annoteca comments" and "Other HTML comments" are independent, so plain HTML comments can be prose-checked while Annoteca markup stays clean.
 - The underline shows where findings overlap. Each stretch of text is underlined in the color of the most severe finding covering it, and a stretch covered by two or more findings gets a double underline, so a spot with several issues is visibly distinct from a single-issue one and you can see where each finding's range begins and ends, instead of one flat mark that hid how many issues cover each part of the text.
+
+## [0.1.0] - 2026-08-31
+
+### Added
+- Settings tab with a writing-profile selector and the standard version and links footer.
+- Engine groundwork: pure sentence-rhythm statistics (burstiness) with unit tests.
+- Engine core: the lint() contract plus the base protected-span pass, so code and headings no longer skew the prose metrics.
+- Live rhythm readout: the status bar shows the active note's burstiness as you type, and a command reports the full metrics.
+- Rules as data: the base pack's first mechanical rules flag AI-shaped phrasing over prose, skipping code and quotes, and the status bar shows the flag count for the active note.
+- Scripture pack: inline quoted verses with a citation are detected and protected, so no rule fires inside scripture, and the scripture pack adds a devotional-register rule.
+- Inline diagnostics: flagged phrases are underlined in the editor, with the rule message on hover.
+- Findings panel: a side panel lists every flag in the active note, and clicking one jumps to it in the editor. Open it from the ribbon or the command palette.
+- More base rules: summative-closer and cinematic-opener, plus a longer flagged-vocabulary list.
+- Heuristic cross-sentence rules: negation-assertion (a negation set up only to be corrected) and anaphora (a repeated sentence opening), flagged as suggestions.
+- Flags report: a command writes the active note's findings as JSON into the vault's `.plumbline/` folder, so a collaborator on the filesystem reads the same findings the editor shows.
+- Vault config: a `.plumbline/config.json` file lets you tune the built-in rules and add your own without touching code, reloadable with a command.
+- Scripture usage: citations are parsed and counted per translation, shown in the report and a command. This is the foundation for the copyright verse caps.
+- Verbatim scripture check: a command compares each quoted verse against the vault's Bible corpus and reports possible mismatches, skipping verses it cannot find in the corpus.
+- Verse caps: a command aggregates distinct quoted verses per translation across the vault and flags any translation over its copyright cap.
+- More base rules: hollow-attribution, placeholder-memory, self-rating, trailing-participial (comma-prefixed participles).
+- Two more heuristics: rhetorical-pivot (an application question like "But what does this mean for us today?") and demonstrative-opener (a bare "This shows..." with no noun).
+- Structural rules over a new paragraph pass: transitional-stacking (a paragraph-initial "However,"), formatting-tells (consecutive bold-led paragraphs), emphasis-fragment (a whole-sentence fragment like "Full stop.").
+- Judgment-tier notes (suggestions): personal-claims-vague flags a first-person claim carrying no specific, and anchor-test flags an abstract sentence with no concrete particular.
+- AI disclosure: a command reads the active note's `provenance` frontmatter (cold, AI-edited, or AI-drafted) and reports the Amazon KDP disclosure it requires.
