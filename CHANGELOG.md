@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Term lists: point a group at a note of words and phrases to avoid, such as a brand voice file, a house style guide, or a product glossary, and every note that group checks is flagged where it uses one, with a one-click replacement where the list names one. The note is plain Markdown: tables with a "Do not use" or "Avoid" column (and, optionally, a "Use instead" column), and bullets that open with a quoted phrase. The brand voice skill's tables work as they are. Set one up under References, then turn it on for a group.
+- When two term lists disagree about a term, the finding says so and the hover offers every suggestion, each labelled with its list, so you choose. The same term in two lists is one finding naming both.
+- A term that differs from its replacement only in case, such as a product name, is matched exactly, so the correct spelling is never flagged.
+
+### Changed
+- A phrase that ends in punctuation, such as "Period." or "Here's the thing:", now matches at the end of a sentence. Word boundaries apply only on a side of a phrase that ends in a letter or digit.
+
 ## [0.3.0] - 2026-09-23
 
 ### Added

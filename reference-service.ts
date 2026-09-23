@@ -18,6 +18,13 @@ import {
 	uniqueReferenceId,
 } from './engine/reference-store';
 import { parseChapter } from './engine/verbatim';
+import {
+	buildTermRules,
+	describeTermList,
+	parseTermList,
+	TermEntry,
+} from './engine/term-list';
+import type { Rule } from './engine/types';
 import type PlumblinePlugin from './main';
 
 // The state of one reference, shown on the References page. Validation runs when
@@ -52,6 +59,12 @@ function childFolders(folder: TFolder): TFolder[] {
 export class ReferenceService {
 	private store: ReferenceStore = emptyReferenceStore();
 	private readonly statuses = new Map<string, ReferenceStatus>();
+	// Parsed terms per term-list reference, refreshed whenever it is validated.
+	private readonly terms = new Map<string, TermEntry[]>();
+	// Merged term rules per group. Every lint pass asks for them, so they are
+	// built once and dropped whenever a term list, a reference's name or type,
+	// or a group's choice of references changes.
+	private readonly ruleCache = new Map<string, Rule[]>();
 	private saveQueue: Promise<void> = Promise.resolve();
 	private readonly pending = new Set<string>();
 	private timer: number | null = null;
@@ -86,6 +99,7 @@ export class ReferenceService {
 	}
 
 	async load(): Promise<void> {
+		this.ruleCache.clear();
 		try {
 			const adapter = this.plugin.app.vault.adapter;
 			this.store = (await adapter.exists(REFERENCES_PATH))
@@ -137,13 +151,29 @@ export class ReferenceService {
 		for (const reference of this.store.references) {
 			await this.revalidate(reference);
 		}
+		// Notes opened before this ran were linted with no term lists loaded,
+		// so re-lint them now that the terms are in.
+		this.plugin.applyConfigChange();
 		this.plugin.onReferencesChanged();
 	}
 
 	// Setup validation: the path exists and its content parses in the type's
 	// format. For a quote source that means the folder layout matches and a
-	// sampled chapter note carries ^vN verse markers.
-	async validate(reference: Reference): Promise<ReferenceStatus> {
+	// sampled chapter note carries ^vN verse markers. For a term list it also
+	// returns the terms read in that same pass, so the caller never needs a
+	// second read that could race a path change.
+	private async check(
+		reference: Reference,
+	): Promise<{ status: ReferenceStatus; entries?: TermEntry[] }> {
+		if (reference.type === 'term-list') {
+			return this.checkTermList(reference);
+		}
+		return { status: await this.checkQuoteSource(reference) };
+	}
+
+	private async checkQuoteSource(
+		reference: Reference,
+	): Promise<ReferenceStatus> {
 		const path = reference.path.trim();
 		if (path.length === 0) {
 			return { state: 'invalid', message: 'Choose a folder.' };
@@ -190,14 +220,62 @@ export class ReferenceService {
 	// Validation awaits a file read, so the reference may be deleted or re-pointed
 	// meanwhile; a late result for it is dropped rather than resurrecting its
 	// status.
+	// A term list is valid when its note exists and at least one term parses
+	// from it. The parsed terms are kept, so linting never re-reads the file.
+	private async checkTermList(
+		reference: Reference,
+	): Promise<{ status: ReferenceStatus; entries?: TermEntry[] }> {
+		const path = reference.path.trim();
+		if (path.length === 0) {
+			return { status: { state: 'invalid', message: 'Choose a note.' } };
+		}
+		const file = this.plugin.app.vault.getFileByPath(normalizePath(path));
+		if (!file) {
+			return {
+				status: {
+					state: 'missing',
+					message: `Note not found: ${path}`,
+				},
+			};
+		}
+		const entries = parseTermList(
+			await this.plugin.app.vault.cachedRead(file),
+		);
+		if (entries.length === 0) {
+			return {
+				status: {
+					state: 'invalid',
+					message:
+						'No terms found. Add a table with a column such as "Do not use" or "Avoid", or bullets that open with a quoted phrase.',
+				},
+			};
+		}
+		return {
+			status: { state: 'ok', message: describeTermList(entries) },
+			entries,
+		};
+	}
+
 	// The path is captured up front so a slower check of an old path cannot
 	// overwrite the result for a path chosen since.
 	private async revalidate(reference: Reference): Promise<void> {
 		const path = reference.path;
-		const status = await this.validate(reference);
-		if (this.get(reference.id) === reference && reference.path === path) {
-			this.statuses.set(reference.id, status);
+		const type = reference.type;
+		const { status, entries } = await this.check(reference);
+		if (
+			this.get(reference.id) !== reference ||
+			reference.path !== path ||
+			reference.type !== type
+		) {
+			return;
 		}
+		this.statuses.set(reference.id, status);
+		if (entries !== undefined) {
+			this.terms.set(reference.id, entries);
+		} else {
+			this.terms.delete(reference.id);
+		}
+		this.ruleCache.clear();
 	}
 
 	async create(): Promise<string> {
@@ -220,7 +298,10 @@ export class ReferenceService {
 			return;
 		}
 		reference.name = name;
+		this.ruleCache.clear();
 		await this.save();
+		// A term finding names its list, so open notes re-lint with the new name.
+		this.plugin.applyConfigChange();
 	}
 
 	// Change a reference's path and validate it straight away, so the editor can
@@ -240,9 +321,28 @@ export class ReferenceService {
 		return this.statuses.get(id);
 	}
 
+	// Change what kind of reference this is. The path is kept, and checked again
+	// against the new type's format.
+	async setType(
+		id: string,
+		type: Reference['type'],
+	): Promise<ReferenceStatus | undefined> {
+		const reference = this.get(id);
+		if (!reference) {
+			return undefined;
+		}
+		reference.type = type;
+		await this.revalidate(reference);
+		await this.save();
+		this.plugin.applyConfigChange();
+		return this.statuses.get(id);
+	}
+
 	async delete(id: string): Promise<void> {
 		removeReference(this.store, id);
+		this.ruleCache.clear();
 		this.statuses.delete(id);
+		this.terms.delete(id);
 		await this.save();
 		this.plugin.applyConfigChange();
 	}
@@ -253,6 +353,7 @@ export class ReferenceService {
 		on: boolean,
 	): Promise<void> {
 		setAssigned(this.store, groupId, referenceId, on);
+		this.ruleCache.clear();
 		await this.save();
 		this.plugin.applyConfigChange();
 	}
@@ -267,6 +368,7 @@ export class ReferenceService {
 			return;
 		}
 		this.store.assignments[toGroupId] = [...from];
+		this.ruleCache.clear();
 		await this.save();
 	}
 
@@ -275,6 +377,7 @@ export class ReferenceService {
 			return;
 		}
 		delete this.store.assignments[groupId];
+		this.ruleCache.clear();
 		await this.save();
 	}
 
@@ -357,6 +460,22 @@ export class ReferenceService {
 			}
 		}
 		return out;
+	}
+
+	// The term rules for a group: every valid term list it uses, merged so a term
+	// in two lists is one rule naming both, with every suggestion kept.
+	termRules(groupId: string): Rule[] {
+		const cached = this.ruleCache.get(groupId);
+		if (cached) {
+			return cached;
+		}
+		const lists = this.forGroup(groupId)
+			.filter((r) => r.type === 'term-list')
+			.map((r) => ({ name: r.name, entries: this.terms.get(r.id) ?? [] }))
+			.filter((list) => list.entries.length > 0);
+		const rules = lists.length > 0 ? buildTermRules(lists) : [];
+		this.ruleCache.set(groupId, rules);
+		return rules;
 	}
 
 	// Every quote-source folder in the vault, whichever group uses it. Their notes

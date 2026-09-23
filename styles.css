@@ -77,6 +77,10 @@
 	flex-wrap: wrap;
 	justify-content: space-between;
 	gap: var(--size-2-3);
+	/* Obsidian gives a button a fixed height. In a narrow sidebar the phrase,
+	   rule, and line wrap onto separate lines, so the height must follow the
+	   content or the wrapped lines spill over the message below. */
+	height: auto;
 }
 
 .plumbline-finding-text {

@@ -460,12 +460,20 @@ export default class PlumblinePlugin extends Plugin {
 		const profile =
 			(text !== undefined ? fileScope(text).profileId : undefined) ??
 			this.settings.activeProfile;
-		return resolveConfig(
+		const config = resolveConfig(
 			profile,
 			this.vaultConfig,
 			this.userGroups,
 			this.userChecks,
 		);
+		// Term lists the note's group uses add their own rules. They come from
+		// references (vault files), not from packs, so they join here rather
+		// than inside the pure resolver.
+		const group = findGroup(profile, this.userGroups) ?? fallbackGroup();
+		const termRules = this.references.termRules(group.id);
+		return termRules.length > 0
+			? { ...config, rules: [...config.rules, ...termRules] }
+			: config;
 	}
 
 	private async loadVaultConfig(): Promise<void> {

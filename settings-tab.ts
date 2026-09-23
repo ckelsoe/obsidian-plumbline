@@ -17,9 +17,11 @@ import { prettifySlug } from './engine/config';
 import type { Severity } from './engine/types';
 import {
 	REFERENCE_TYPE_LABELS,
+	referenceTargetsFile,
 	type Reference,
+	type ReferenceType,
 } from './engine/reference-store';
-import { FolderSuggest } from './folder-suggest';
+import { PathSuggest } from './path-suggest';
 
 // Community discussion for this plugin. This must stay a never-expiring
 // discord.gg invite. A discord.com/channels/... deep link only resolves for
@@ -170,7 +172,7 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			{
 				type: 'page',
 				name: 'References',
-				desc: 'Files and folders your checks compare against, such as Bible text for checking quoted verses. Define one here, then turn it on for each group that should use it.',
+				desc: 'Files and folders your checks compare against, such as a brand voice file of terms to avoid, or Bible text for checking quoted verses. Define one here, then turn it on for each group that should use it.',
 				displayValue: () => this.describeReferenceCount(),
 				items: [this.buildReferenceList()],
 			},
@@ -336,7 +338,11 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			items: this.plugin.references.list().map((reference) => ({
 				type: 'page' as const,
 				name: reference.name,
-				desc: reference.path || 'No folder chosen',
+				desc:
+					reference.path ||
+					(referenceTargetsFile(reference.type)
+						? 'No note chosen'
+						: 'No folder chosen'),
 				displayValue: () => this.describeReferenceStatus(reference.id),
 				page: () => new ReferenceEditorPage(this, reference.id),
 			})),
@@ -978,6 +984,15 @@ class CheckEditorPage extends SettingPage {
 	}
 }
 
+// What each reference type is for and the format it reads, shown under the
+// type picker in the reference editor.
+const TYPE_HELP: Record<ReferenceType, string> = {
+	'quote-source':
+		'Plumbline checks quoted verses against it. Inside the folder: one folder per translation (named by its code, such as KJV), then one folder per book named like "19 - Psalms", holding one note per chapter named like "Psalms 23", with each verse ending in a block ID like ^v1. The README has a full example.',
+	'term-list':
+		'A note of terms to avoid, flagged in every note the group checks. Use a table with a column such as "Do not use" or "Avoid" and, if you like, one such as "Use instead" for the replacement, or bullets that open with a quoted phrase. A brand voice file in this format works as it is. The README has a full example.',
+};
+
 // A navigable sub-page for one reference: its name, its folder, and the result of
 // the setup validation, which runs as soon as a folder is chosen. Reached through
 // the References list, since the framework cannot open a SettingPage otherwise.
@@ -1029,20 +1044,51 @@ class ReferenceEditorPage extends SettingPage {
 
 		new Setting(editor)
 			.setName('Type')
-			.setDesc(
-				`${REFERENCE_TYPE_LABELS[reference.type]}. Plumbline checks quoted verses against it. Inside the folder: one folder per translation (named by its code, such as KJV), then one folder per book named like "19 - Psalms", holding one note per chapter named like "Psalms 23", with each verse ending in a block ID like ^v1. The README has a full example.`,
-			);
+			.setDesc(TYPE_HELP[reference.type])
+			.addDropdown((dropdown) => {
+				dropdown.selectEl.setAttribute('aria-label', 'Reference type');
+				for (const [type, label] of Object.entries(
+					REFERENCE_TYPE_LABELS,
+				)) {
+					dropdown.addOption(type, label);
+				}
+				dropdown.setValue(reference.type).onChange((value) => {
+					void (async () => {
+						await this.plugin.references.setType(
+							this.id,
+							value as ReferenceType,
+						);
+						// The path field switches between a folder and a note.
+						this.display();
+					})();
+				});
+			});
 
+		const isFile = referenceTargetsFile(reference.type);
 		new Setting(editor)
-			.setName('Folder')
-			.setDesc('Start typing to pick a folder in this vault.')
+			.setName(isFile ? 'Note' : 'Folder')
+			.setDesc(
+				isFile
+					? 'Start typing to pick a note in this vault.'
+					: 'Start typing to pick a folder in this vault.',
+			)
 			.addText((text) => {
-				text.inputEl.setAttribute('aria-label', 'Reference folder');
-				text.setPlaceholder('Example: Bible').setValue(reference.path);
+				text.inputEl.setAttribute(
+					'aria-label',
+					isFile ? 'Reference note' : 'Reference folder',
+				);
+				text.setPlaceholder(
+					isFile ? 'Example: Style/Voice.md' : 'Example: Bible',
+				).setValue(reference.path);
 				const commit = (path: string): void => {
 					void this.commitPath(path);
 				};
-				new FolderSuggest(this.plugin.app, text.inputEl, commit);
+				new PathSuggest(
+					this.plugin.app,
+					text.inputEl,
+					isFile ? 'note' : 'folder',
+					commit,
+				);
 				// A typed path is committed when the field loses focus; a picked
 				// suggestion commits at once. Either way it is validated then.
 				text.inputEl.addEventListener('change', () => {

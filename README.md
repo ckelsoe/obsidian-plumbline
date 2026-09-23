@@ -66,6 +66,47 @@ He maketh me to lie down in green pastures: he leadeth me beside the still water
 
 A verse Plumbline cannot find (a missing translation, book, chapter, or verse) is skipped, never reported as a mismatch. Notes inside a reference folder are left out of the verse-cap count, since they are the reference text rather than quotations.
 
+## Brand voice and style: term lists
+
+A term list is a note of words and phrases to avoid, and what to use instead. Point Plumbline at one and every note checked with that group is flagged where it uses a listed term, with a one-click replacement where the list names one. It suits a brand voice file, a house style guide, a product glossary, or a client's banned words.
+
+1. Write the note (format below), or use a brand voice file you already have.
+2. Open **Settings > Plumbline > References**, add a reference, set its type to **Term list**, and choose the note. Plumbline reads it straight away and shows how many terms it found, or what to fix.
+3. In **Manage groups**, open the group and turn the term list on under **References**. Each kind of writing can have its own voice: a devotional book, a company blog, and a novel can each use a different list, and one group can use several.
+
+### The format
+
+Plumbline reads two things from the note and ignores everything else (headings, prose, frontmatter):
+
+**Tables** with a column of terms to avoid and, optionally, a column of what to use. Columns are recognised by their heading, in either order. A column to avoid is headed with words like "Do not use", "Avoid", "Jargon", or "Banned"; a column to use with words like "Use instead", "Plain replacement", "Preferred", or "Product name". A cell can list several terms separated by commas.
+
+```markdown
+| Product name | Do not use              |
+|--------------|-------------------------|
+| Plumbline    | PlumbLine, Plumb Line   |
+
+| Avoid        | Use instead |
+|--------------|-------------|
+| utilize      | use         |
+| leverage     | use         |
+```
+
+**Bullets that open with a quoted phrase.** These are flagged with no replacement. A bullet that does not start with a quote is treated as guidance and skipped.
+
+```markdown
+- "Here's the thing:"
+- "Let that sink in."
+- "The real [X] is"
+```
+
+- Matching ignores case, except when a term differs from its replacement only in case. "PlumbLine" is then flagged and "Plumbline" is not.
+- A straight apostrophe in the list also matches a curly one in your prose.
+- A placeholder in square brackets matches any one word in the middle of a phrase ("The real [X] is" flags "The real problem is"), and is dropped at the end ("Here's what [X]" flags "Here's what").
+
+### When lists disagree
+
+If two term lists a group uses name the same term, you get one finding that names both lists. If they suggest different replacements, the hover offers each one with the list it came from, and you choose. Plumbline never picks for you. Any term finding can be turned off for a single note from its hover, like any other check.
+
 ## Installation
 
 Plumbline is **not yet in the Obsidian community store**. While it is in early release, install it one of these two ways. Both need a published release, so if the steps below find nothing, a release has not been cut yet.
