@@ -130,11 +130,16 @@ export interface PlumblineSettings {
 	// Whether flagged phrases are underlined in the editor, and whether the
 	// underline yields to Annoteca's open comments. Interop-contract 5.1.
 	inlineUnderlines: InlineUnderlines;
+	// The vault folder holding the scripture corpus the verbatim check reads,
+	// laid out as engine/corpus-layout.ts describes. Empty means not set up, and
+	// the check says so instead of reporting every verse as missing.
+	scriptureFolder: string;
 }
 
 export const DEFAULT_SETTINGS: PlumblineSettings = {
 	activeProfile: 'devotional-nonfiction',
 	inlineUnderlines: DEFAULT_INLINE_UNDERLINES,
+	scriptureFolder: '',
 };
 
 // Debounce for live re-analysis while typing, in milliseconds.
@@ -329,6 +334,10 @@ export default class PlumblinePlugin extends Plugin {
 			inlineUnderlines: isInlineUnderlines(record.inlineUnderlines)
 				? record.inlineUnderlines
 				: DEFAULT_SETTINGS.inlineUnderlines,
+			scriptureFolder:
+				typeof record.scriptureFolder === 'string'
+					? record.scriptureFolder
+					: DEFAULT_SETTINGS.scriptureFolder,
 		};
 	}
 
@@ -1379,8 +1388,8 @@ export default class PlumblinePlugin extends Plugin {
 		new Notice(`Scripture usage\n${lines.join('\n')}`);
 	}
 
-	// Compare each quoted verse against the vault's Bible corpus and report
-	// possible mismatches. Verses it cannot find in the corpus are skipped.
+	// Compare each quoted verse against the Bible text in the scripture folder and report
+	// possible mismatches. Verses it cannot find there are skipped.
 	private async checkScripture(): Promise<void> {
 		try {
 			const view = this.analysis.activeMarkdownView();
@@ -1391,6 +1400,18 @@ export default class PlumblinePlugin extends Plugin {
 			const quotes = scriptureQuotes(view.editor.getValue());
 			if (quotes.length === 0) {
 				new Notice('Plumbline: no quoted scripture in this note.');
+				return;
+			}
+			if (this.settings.scriptureFolder.trim().length === 0) {
+				new Notice(
+					'Plumbline: choose a scripture folder in settings to check quoted verses.',
+				);
+				return;
+			}
+			if (!this.corpus.rootFolder()) {
+				new Notice(
+					`Plumbline: the scripture folder "${this.settings.scriptureFolder}" was not found.`,
+				);
 				return;
 			}
 			let checked = 0;
@@ -1408,15 +1429,15 @@ export default class PlumblinePlugin extends Plugin {
 			}
 			if (checked === 0) {
 				new Notice(
-					'Plumbline: could not find these verses in the corpus.',
+					'Plumbline: could not find these verses in the scripture folder.',
 				);
 			} else if (mismatches.length === 0) {
 				new Notice(
-					`Plumbline: ${checked} quoted verses checked, all match the corpus.`,
+					`Plumbline: ${checked} quoted verses checked, all match the scripture folder.`,
 				);
 			} else {
 				new Notice(
-					`Plumbline: ${mismatches.length} of ${checked} may not match the corpus:\n${mismatches.slice(0, 6).join('\n')}`,
+					`Plumbline: ${mismatches.length} of ${checked} may not match the scripture folder:\n${mismatches.slice(0, 6).join('\n')}`,
 				);
 			}
 		} catch (err) {
@@ -1425,13 +1446,20 @@ export default class PlumblinePlugin extends Plugin {
 		}
 	}
 
-	// Aggregate scripture citations across the whole vault (excluding the Bible
-	// corpus) and check each translation's distinct-verse total against its cap.
+	// Aggregate scripture citations across the whole vault (excluding the
+	// scripture folder, whose verses are the reference text, not reproductions)
+	// and check each translation's distinct-verse total against its cap.
 	private async checkVerseCaps(): Promise<void> {
 		try {
+			const corpusRoot = this.corpus.rootFolder();
+			const corpusPrefix = corpusRoot ? `${corpusRoot.path}/` : null;
 			const files = this.app.vault
 				.getMarkdownFiles()
-				.filter((file) => !file.path.startsWith('10-bibles/'));
+				.filter(
+					(file) =>
+						corpusPrefix === null ||
+						!file.path.startsWith(corpusPrefix),
+				);
 			// Copyright caps count reproduced verses, so use quoted scripture
 			// only, not bare cross-references.
 			const citations: Citation[] = [];

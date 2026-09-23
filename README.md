@@ -20,6 +20,46 @@ Plumbline reads your prose and points at the places that read as machine-written
 - **Readable on the filesystem.** A command writes each note's findings as JSON into `.plumbline/`, so a collaborator or an assistant working on the files sees the same findings you do.
 - **Works with Annoteca.** Turn a finding into a comment thread, and let the underline step aside where a comment already marks the passage. See [docs/annoteca.md](./docs/annoteca.md).
 
+## Scripture tools
+
+Three commands help when a manuscript quotes the Bible. Two work on any vault. The third needs the Bible text in your vault.
+
+- **Show scripture usage for the active note** counts the scripture citations in the note, per translation.
+- **Check verse caps across the vault** adds up the distinct verses you quote from each translation, across every note, and flags any translation over its publisher's quotation limit.
+- **Check quoted scripture for the active note** compares each quoted verse against the Bible text in your vault and lists quotes that may not match it word for word. This is the one that needs setup.
+
+### Setting up the Bible text
+
+Plumbline does not ship any Bible text. To use "Check quoted scripture", put the translations you quote in a folder in your vault, then choose that folder under **Settings > Plumbline > Scripture folder**. Until a folder is chosen, the command tells you so rather than guessing.
+
+The folder must use this layout:
+
+```
+Bible/                      <- the folder you choose in settings
+  KJV/                      <- one folder per translation, named by its code
+    01 - Genesis/           <- one folder per book: any prefix, " - ", the book name
+      Genesis 1.md          <- one note per chapter: "<book name> <chapter>.md"
+      Genesis 2.md
+    19 - Psalms/
+      Psalms 23.md
+  ESV/
+    ...
+```
+
+- The translation folder name is the code you cite, such as `(Psalm 23:1, KJV)`. Case does not matter.
+- A citation of "Psalm" finds a book folder named "Psalms".
+- Inside a chapter note, end each verse with an Obsidian block ID of the form `^v<number>`. Frontmatter and a leading `# Heading` are ignored:
+
+```markdown
+# Psalms 23
+
+The LORD is my shepherd; I shall not want. ^v1
+
+He maketh me to lie down in green pastures: he leadeth me beside the still waters. ^v2
+```
+
+A verse Plumbline cannot find (a missing translation, book, chapter, or verse) is skipped, never reported as a mismatch. Notes inside the scripture folder are left out of the verse-cap count, since they are the reference text rather than quotations.
+
 ## Installation
 
 Plumbline is **not yet in the Obsidian community store**. While it is in early release, install it one of these two ways. Both need a published release, so if the steps below find nothing, a release has not been cut yet.
