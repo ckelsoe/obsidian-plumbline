@@ -13,12 +13,18 @@ import { asStringArray } from './vault-config';
 export const REFERENCES_PATH = '.plumbline/references.json';
 
 // Only types whose feature has shipped are listed, so the UI never offers a type
-// that does nothing. Term list and name list join this union when they ship.
-export type ReferenceType = 'quote-source';
+// that does nothing. Name list joins this union when it ships.
+export type ReferenceType = 'quote-source' | 'term-list';
 
 export const REFERENCE_TYPE_LABELS: Record<ReferenceType, string> = {
 	'quote-source': 'Quote source (scripture layout)',
+	'term-list': 'Term list (voice or style file)',
 };
+
+// Whether a type points at a folder or at a single note.
+export function referenceTargetsFile(type: ReferenceType): boolean {
+	return type === 'term-list';
+}
 
 export interface Reference {
 	id: string;

@@ -31,6 +31,17 @@ export interface Diagnostic {
 	// the exact phrase that matched. Absent means there is no single right word
 	// and the decision is the writer's.
 	fix?: string;
+	// Several labelled suggestions, from reference-driven rules (term lists).
+	// When two references disagree about one term, every suggestion is offered,
+	// each naming its reference, and the writer picks: nothing is resolved
+	// silently. Present instead of `fix`, never alongside it.
+	fixOptions?: FixOption[];
+}
+
+// One suggested replacement and the reference it came from.
+export interface FixOption {
+	text: string;
+	source: string;
 }
 
 // A rule as data, not code. A mechanical rule flags any of its `phrases`, matched
@@ -51,6 +62,13 @@ export interface Rule {
 	// a right answer and stays silent on the rest. Offering a wrong word is worse
 	// than offering none: the writer would have to undo it and lose their own.
 	replace?: Record<string, string>;
+	// Labelled suggestions per phrase, for reference-driven rules; keyed like
+	// `replace` (lower-cased, or as written when caseSensitive).
+	fixOptions?: Record<string, FixOption[]>;
+	// Match the phrases exactly as written. For a product name whose wrong form
+	// differs only in case ("PlumbLine" for "Plumbline"), a case-insensitive
+	// match would flag the correct spelling too.
+	caseSensitive?: boolean;
 	// How often this rule is right when it fires, 0..1. Ranking multiplies by it,
 	// so a rule that is usually correct outranks a noisy one with the same
 	// severity and count. Omitted means the default for the rule's kind, which is

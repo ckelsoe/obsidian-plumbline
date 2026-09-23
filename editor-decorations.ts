@@ -267,8 +267,14 @@ function renderFinding(
 	el.createSpan({ cls: 'plumbline-hover-text', text: diagnostic.message });
 
 	const row = el.createDiv({ cls: 'plumbline-hover-actions' });
-	const { fix } = diagnostic;
-	if (fix !== undefined) {
+	// The replacements on offer: a built-in rule's single fix, or every labelled
+	// suggestion from the term lists (all of them when lists disagree, so the
+	// writer decides). Each becomes its own button.
+	const choices: { text: string; source?: string }[] =
+		diagnostic.fix !== undefined
+			? [{ text: diagnostic.fix }]
+			: (diagnostic.fixOptions ?? []);
+	if (choices.length > 0) {
 		const phrase = view.state.doc.sliceString(
 			diagnostic.start,
 			diagnostic.end,
@@ -278,40 +284,45 @@ function renderFinding(
 			diagnostic.start,
 			diagnostic.end,
 		);
-		const apply = row.createEl('button', {
-			cls: 'plumbline-hover-action',
-			text: `Use "${fix}"`,
-			attr: {
-				type: 'button',
-				// The visible text is two words out of context. Read aloud it has
-				// to say what is being replaced and with what.
-				'aria-label': allowed
-					? `Replace "${phrase}" with "${fix}"`
-					: `Cannot replace "${phrase}": Annoteca has a comment on it`,
-				...(allowed
-					? {}
-					: {
-							disabled: 'true',
-							title: 'Annoteca has a comment anchored here, so it owns this text.',
-						}),
-			},
-		});
-		apply.addEventListener('click', () => {
-			if (!allowed) {
-				return;
-			}
-			// A plain document change, so it lands in the editor's own undo
-			// history and one ctrl+Z puts the writer's word back. The tooltip
-			// closes on the change (hideOnChange), which is what should happen:
-			// the finding it described is gone.
-			view.dispatch({
-				changes: {
-					from: diagnostic.start,
-					to: diagnostic.end,
-					insert: fix,
+		for (const choice of choices) {
+			const fix = choice.text;
+			const from =
+				choice.source === undefined ? '' : ` (${choice.source})`;
+			const apply = row.createEl('button', {
+				cls: 'plumbline-hover-action',
+				text: `Use "${fix}"${from}`,
+				attr: {
+					type: 'button',
+					// The visible text is two words out of context. Read aloud it
+					// has to say what is being replaced and with what.
+					'aria-label': allowed
+						? `Replace "${phrase}" with "${fix}"${from}`
+						: `Cannot replace "${phrase}": Annoteca has a comment on it`,
+					...(allowed
+						? {}
+						: {
+								disabled: 'true',
+								title: 'Annoteca has a comment anchored here, so it owns this text.',
+							}),
 				},
 			});
-		});
+			apply.addEventListener('click', () => {
+				if (!allowed) {
+					return;
+				}
+				// A plain document change, so it lands in the editor's own undo
+				// history and one ctrl+Z puts the writer's word back. The tooltip
+				// closes on the change (hideOnChange), which is what should
+				// happen: the finding it described is gone.
+				view.dispatch({
+					changes: {
+						from: diagnostic.start,
+						to: diagnostic.end,
+						insert: fix,
+					},
+				});
+			});
+		}
 	}
 	if (actions.canAnnotate()) {
 		const annotate = row.createEl('button', {
