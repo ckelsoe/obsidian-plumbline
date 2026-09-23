@@ -29,6 +29,14 @@ export interface ReferenceStatus {
 	message: string;
 }
 
+// A stored reference path is always in Obsidian's normal form, so every prefix
+// comparison (re-checks, rename following) matches what the vault reports. An
+// empty path stays empty: normalizePath('') would turn it into "/".
+function storedPath(path: string): string {
+	const trimmed = path.trim();
+	return trimmed.length > 0 ? normalizePath(trimmed) : '';
+}
+
 // How long after the last vault change under a reference to re-check it.
 const REVALIDATE_DELAY = 500;
 
@@ -87,6 +95,10 @@ export class ReferenceService {
 						) as unknown,
 					)
 				: emptyReferenceStore();
+			// A hand-edited file may hold "Bible/" or a backslash path.
+			for (const reference of this.store.references) {
+				reference.path = storedPath(reference.path);
+			}
 		} catch (err) {
 			console.error(err);
 			this.store = emptyReferenceStore();
@@ -96,7 +108,8 @@ export class ReferenceService {
 	// Persist through a queue so two quick edits cannot interleave their writes.
 	// The file lives in the .plumbline dot-folder, which the Vault API does not
 	// index, so it goes through the adapter like groups.json and checks.json.
-	private async save(): Promise<void> {
+	private async save(): Promise<boolean> {
+		let ok = true;
 		this.saveQueue = this.saveQueue.then(async () => {
 			try {
 				const adapter = this.plugin.app.vault.adapter;
@@ -108,6 +121,7 @@ export class ReferenceService {
 					serializeReferenceStore(this.store),
 				);
 			} catch (err) {
+				ok = false;
 				console.error(err);
 				// A save failure is the one reference problem worth a notice: the
 				// change the writer just made did not stick.
@@ -115,6 +129,7 @@ export class ReferenceService {
 			}
 		});
 		await this.saveQueue;
+		return ok;
 	}
 
 	// Validate every reference, e.g. once the vault has finished loading.
@@ -218,7 +233,7 @@ export class ReferenceService {
 		if (!reference) {
 			return undefined;
 		}
-		reference.path = path.trim();
+		reference.path = storedPath(path);
 		await this.revalidate(reference);
 		await this.save();
 		this.plugin.applyConfigChange();
@@ -360,7 +375,7 @@ export class ReferenceService {
 		folder: string,
 		scriptureGroupIds: readonly string[],
 	): Promise<boolean> {
-		const path = folder.trim();
+		const path = storedPath(folder);
 		if (path.length === 0) {
 			return false;
 		}
@@ -375,7 +390,14 @@ export class ReferenceService {
 		for (const groupId of scriptureGroupIds) {
 			setAssigned(this.store, groupId, reference.id, true);
 		}
-		await this.save();
-		return true;
+		// Report success only if the reference really reached disk: the caller
+		// deletes the old setting on true, and losing both would lose the
+		// writer's configuration for good. On failure the in-memory reference is
+		// dropped too, so the next load retries the migration from the setting.
+		if (await this.save()) {
+			return true;
+		}
+		removeReference(this.store, reference.id);
+		return false;
 	}
 }
