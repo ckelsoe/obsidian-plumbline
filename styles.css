@@ -527,3 +527,12 @@
 .plumbline-hover-tag-suggestion {
 	color: var(--text-accent);
 }
+
+/* Reference editor: the setup-validation result reads as success or a problem. */
+.plumbline-reference-ok .setting-item-description {
+	color: var(--text-success);
+}
+
+.plumbline-reference-problem .setting-item-description {
+	color: var(--text-error);
+}
