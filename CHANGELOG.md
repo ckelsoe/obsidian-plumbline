@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-23
+
 ### Added
 - References: named files and folders that checks compare against, defined once under Settings > References and turned on per group in the group editor. A group can use several at once, and a starter group can use one without being copied first. Bible text for "Check quoted scripture" is the first kind. Choosing a folder checks it straight away and reports what it found ("2 translations, 66 books, 1,189 chapters") or exactly what to fix. A renamed or moved folder is followed; a deleted one shows as Missing and is skipped.
 

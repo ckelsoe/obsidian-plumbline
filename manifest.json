@@ -1,7 +1,7 @@
 {
 	"id": "plumbline",
 	"name": "Plumbline",
-	"version": "0.2.1",
+	"version": "0.3.0",
 	"minAppVersion": "1.13.0",
 	"description": "Flag AI-shaped writing and check prose rhythm against your own calibrated baseline.",
 	"author": "Charles Kelsoe (ckelsoe)",
