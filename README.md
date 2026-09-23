@@ -22,7 +22,7 @@ Plumbline reads your prose and points at the places that read as machine-written
 
 ## Scripture tools
 
-Three commands help when a manuscript quotes the Bible. Two work on any vault. The third needs the Bible text in your vault.
+Three commands help when a manuscript quotes the Bible. They appear in the command palette when the note you are in is checked with a group that includes the scripture checks, such as the Devotional nonfiction starter. Two work on any vault. The third needs the Bible text in your vault.
 
 - **Show scripture usage for the active note** counts the scripture citations in the note, per translation.
 - **Check verse caps across the vault** adds up the distinct verses you quote from each translation, across every note, and flags any translation over its publisher's quotation limit.
@@ -30,7 +30,13 @@ Three commands help when a manuscript quotes the Bible. Two work on any vault. T
 
 ### Setting up the Bible text
 
-Plumbline does not ship any Bible text. To use "Check quoted scripture", put the translations you quote in a folder in your vault, then choose that folder under **Settings > Plumbline > Scripture folder**. Until a folder is chosen, the command tells you so rather than guessing.
+Plumbline does not ship any Bible text. To use "Check quoted scripture":
+
+1. Put the translations you quote in a folder in your vault, in the layout below.
+2. Open **Settings > Plumbline > References**, add a reference, and choose that folder. Plumbline checks the folder straight away and shows what it found, such as "2 translations, 66 books, 1,189 chapters", or what to fix.
+3. Open **Manage groups**, pick the group you write with, and turn the reference on under **References**. A starter group can use a reference too; you do not need to copy it first.
+
+A group can use several references at once. Until the group has one, the command tells you so rather than guessing. If you rename or move the folder, the reference follows it; if you delete it, the reference shows as Missing.
 
 The folder must use this layout:
 
@@ -58,7 +64,7 @@ The LORD is my shepherd; I shall not want. ^v1
 He maketh me to lie down in green pastures: he leadeth me beside the still waters. ^v2
 ```
 
-A verse Plumbline cannot find (a missing translation, book, chapter, or verse) is skipped, never reported as a mismatch. Notes inside the scripture folder are left out of the verse-cap count, since they are the reference text rather than quotations.
+A verse Plumbline cannot find (a missing translation, book, chapter, or verse) is skipped, never reported as a mismatch. Notes inside a reference folder are left out of the verse-cap count, since they are the reference text rather than quotations.
 
 ## Installation
 

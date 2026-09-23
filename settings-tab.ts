@@ -15,6 +15,11 @@ import type { GroupDefinition } from './engine/groups';
 import { SCRIPTURE_PACK_ID } from './engine/scripture';
 import { prettifySlug } from './engine/config';
 import type { Severity } from './engine/types';
+import {
+	REFERENCE_TYPE_LABELS,
+	type Reference,
+} from './engine/reference-store';
+import { FolderSuggest } from './folder-suggest';
 
 // Community discussion for this plugin. This must stay a never-expiring
 // discord.gg invite. A discord.com/channels/... deep link only resolves for
@@ -151,21 +156,6 @@ export class PlumblineSettingTab extends PluginSettingTab {
 					},
 				})),
 			},
-			{
-				type: 'group',
-				heading: 'Scripture',
-				items: [
-					{
-						name: 'Scripture folder',
-						desc: 'The folder holding the Bible text that "Check quoted scripture" compares your quotes against. Inside it, one folder per translation, then one folder per book named like "19 - Psalms", holding one note per chapter named like "Psalms 23", with each verse ending in a ^v1, ^v2, ... block ID. Leave empty if you do not use this check.',
-						control: {
-							type: 'folder',
-							key: 'scriptureFolder',
-							placeholder: 'Example: Bible',
-						},
-					},
-				],
-			},
 			this.buildActiveRulesList(),
 			{
 				type: 'page',
@@ -176,6 +166,13 @@ export class PlumblineSettingTab extends PluginSettingTab {
 					this.buildCustomCheckList(),
 					this.buildBuiltinToggleList(),
 				],
+			},
+			{
+				type: 'page',
+				name: 'References',
+				desc: 'Files and folders your checks compare against, such as Bible text for checking quoted verses. Define one here, then turn it on for each group that should use it.',
+				displayValue: () => this.describeReferenceCount(),
+				items: [this.buildReferenceList()],
 			},
 			{
 				name: '',
@@ -301,6 +298,62 @@ export class PlumblineSettingTab extends PluginSettingTab {
 	}
 
 	// Count shown on the "Check library" entry: how many custom checks exist.
+	private describeReferenceCount(): string {
+		const count = this.plugin.references.list().length;
+		return count === 0
+			? 'none yet'
+			: `${count} reference${count === 1 ? '' : 's'}`;
+	}
+
+	// Every reference, each opening its editor, with delete on the row and a New
+	// reference affordance. The row shows whether the reference checks out.
+	private buildReferenceList(): SettingDefinitionList {
+		return {
+			type: 'list',
+			heading: 'Your references',
+			emptyState:
+				'No references yet. Add one with New reference, choose its folder, then turn it on in a group.',
+			onDelete: (index: number) => {
+				const reference = this.plugin.references.list()[index];
+				if (!reference) {
+					return;
+				}
+				void (async () => {
+					await this.plugin.references.delete(reference.id);
+					new Notice(`Plumbline: deleted ${reference.name}.`);
+					this.update();
+				})();
+			},
+			addItem: {
+				name: 'New reference',
+				action: () => {
+					void (async () => {
+						await this.plugin.references.create();
+						this.update();
+					})();
+				},
+			},
+			items: this.plugin.references.list().map((reference) => ({
+				type: 'page' as const,
+				name: reference.name,
+				desc: reference.path || 'No folder chosen',
+				displayValue: () => this.describeReferenceStatus(reference.id),
+				page: () => new ReferenceEditorPage(this, reference.id),
+			})),
+		};
+	}
+
+	describeReferenceStatus(id: string): string {
+		const state = this.plugin.references.status(id)?.state;
+		if (state === 'ok') {
+			return 'OK';
+		}
+		if (state === 'missing') {
+			return 'Missing';
+		}
+		return state === 'invalid' ? 'Needs attention' : 'Checking';
+	}
+
 	private describeLibraryCount(): string {
 		const custom = this.plugin.customCheckList().length;
 		return custom === 0
@@ -592,6 +645,8 @@ class GroupEditorPage extends SettingPage {
 					});
 			});
 
+		this.renderReferences(editor, group);
+
 		new Setting(editor)
 			.setName('Duplicate')
 			.setDesc(
@@ -609,6 +664,50 @@ class GroupEditorPage extends SettingPage {
 					})();
 				}),
 			);
+	}
+
+	// Which references this group checks against. A starter can use references
+	// too: the choice is stored with the references, not on the read-only group.
+	private renderReferences(
+		editor: HTMLElement,
+		group: GroupDefinition,
+	): void {
+		new Setting(editor).setName('References').setHeading();
+		const references = this.plugin.references.list();
+		if (references.length === 0) {
+			new Setting(editor).setDesc(
+				'No references yet. Add one from the main settings page, then turn it on here.',
+			);
+			return;
+		}
+		for (const reference of references) {
+			const status = this.plugin.references.status(reference.id);
+			new Setting(editor)
+				.setName(reference.name)
+				.setDesc(
+					`${REFERENCE_TYPE_LABELS[reference.type]}. ${status?.message ?? ''}`.trim(),
+				)
+				.addToggle((toggle) => {
+					toggle.toggleEl.setAttribute(
+						'aria-label',
+						`Use ${reference.name} in this group`,
+					);
+					toggle
+						.setValue(
+							this.plugin.references.isAssigned(
+								group.id,
+								reference.id,
+							),
+						)
+						.onChange((value) => {
+							void this.plugin.references.setAssigned(
+								group.id,
+								reference.id,
+								value,
+							);
+						});
+				});
+		}
 	}
 }
 
@@ -876,5 +975,122 @@ class CheckEditorPage extends SettingPage {
 						})();
 					});
 			});
+	}
+}
+
+// A navigable sub-page for one reference: its name, its folder, and the result of
+// the setup validation, which runs as soon as a folder is chosen. Reached through
+// the References list, since the framework cannot open a SettingPage otherwise.
+class ReferenceEditorPage extends SettingPage {
+	private tab: PlumblineSettingTab;
+	private id: string;
+	private statusSetting: Setting | null = null;
+
+	constructor(tab: PlumblineSettingTab, id: string) {
+		super();
+		this.tab = tab;
+		this.id = id;
+		this.title = this.reference()?.name ?? 'Reference';
+	}
+
+	private get plugin(): PlumblinePlugin {
+		return this.tab.plugin;
+	}
+
+	private reference(): Reference | undefined {
+		return this.plugin.references.get(this.id);
+	}
+
+	hide(): void {
+		super.hide();
+		this.tab.update();
+	}
+
+	display(): void {
+		const editor = this.containerEl;
+		editor.empty();
+		const reference = this.reference();
+		if (!reference) {
+			editor.createEl('p', { text: 'This reference no longer exists.' });
+			return;
+		}
+
+		new Setting(editor).setName('Name').addText((text) => {
+			text.inputEl.setAttribute('aria-label', 'Reference name');
+			text.setValue(reference.name).onChange((value) => {
+				const name = value.trim();
+				if (name.length === 0) {
+					return;
+				}
+				this.title = name;
+				void this.plugin.references.rename(this.id, name);
+			});
+		});
+
+		new Setting(editor)
+			.setName('Type')
+			.setDesc(
+				`${REFERENCE_TYPE_LABELS[reference.type]}. Plumbline checks quoted verses against it. Inside the folder: one folder per translation (named by its code, such as KJV), then one folder per book named like "19 - Psalms", holding one note per chapter named like "Psalms 23", with each verse ending in a block ID like ^v1. The README has a full example.`,
+			);
+
+		new Setting(editor)
+			.setName('Folder')
+			.setDesc('Start typing to pick a folder in this vault.')
+			.addText((text) => {
+				text.inputEl.setAttribute('aria-label', 'Reference folder');
+				text.setPlaceholder('Example: Bible').setValue(reference.path);
+				const commit = (path: string): void => {
+					void this.commitPath(path);
+				};
+				new FolderSuggest(this.plugin.app, text.inputEl, commit);
+				// A typed path is committed when the field loses focus; a picked
+				// suggestion commits at once. Either way it is validated then.
+				text.inputEl.addEventListener('change', () => {
+					commit(text.getValue());
+				});
+			});
+
+		this.statusSetting = new Setting(editor).setName('Check');
+		this.renderStatus();
+
+		const users = this.plugin.references
+			.groupIdsUsing(this.id)
+			.map(
+				(id) =>
+					allGroups(this.plugin.groups()).find((g) => g.id === id)
+						?.name ?? id,
+			);
+		new Setting(editor)
+			.setName('Used by')
+			.setDesc(
+				users.length > 0
+					? users.join(', ')
+					: "No group yet. Turn it on in a group's editor under Manage groups.",
+			);
+	}
+
+	private async commitPath(path: string): Promise<void> {
+		if (this.statusSetting) {
+			this.statusSetting.setDesc('Checking...');
+		}
+		await this.plugin.references.setPath(this.id, path);
+		this.renderStatus();
+	}
+
+	private renderStatus(): void {
+		const setting = this.statusSetting;
+		if (!setting) {
+			return;
+		}
+		const status = this.plugin.references.status(this.id);
+		setting.setDesc(status?.message ?? 'Checking...');
+		setting.settingEl.toggleClass(
+			'plumbline-reference-ok',
+			status?.state === 'ok',
+		);
+		setting.settingEl.toggleClass(
+			'plumbline-reference-problem',
+			status !== undefined && status.state !== 'ok',
+		);
 	}
 }

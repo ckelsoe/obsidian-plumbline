@@ -68,7 +68,110 @@ export function matchBookFolder(
 	return plural;
 }
 
+// Is this file a chapter note for the book, named exactly as the lookup asks for
+// it ("Psalms 23.md")? A note like "Psalms notes.md" or "Psalms 23 draft.md" is
+// not, since chapterFileName() would never produce that name.
+export function isChapterFileName(file: string, bookName: string): boolean {
+	const prefix = `${bookName} `;
+	if (!file.startsWith(prefix) || !file.endsWith('.md')) {
+		return false;
+	}
+	const number = file.slice(prefix.length, -'.md'.length);
+	if (number.length === 0 || number.startsWith('0')) {
+		return false;
+	}
+	for (const char of number) {
+		if (char < '0' || char > '9') {
+			return false;
+		}
+	}
+	return true;
+}
+
 // The chapter file name inside a book folder: "<Book> <chapter>.md".
 export function chapterFileName(bookFolder: string, chapter: number): string {
 	return `${bookNameOf(bookFolder) ?? bookFolder} ${chapter}.md`;
+}
+
+// A snapshot of a quote-source folder's structure, built plugin-side from the
+// vault so the validation below stays pure.
+export interface LayoutTranslation {
+	name: string;
+	books: { name: string; files: string[] }[];
+}
+
+export interface LayoutCheck {
+	ok: boolean;
+	// A one-line summary when ok ("2 translations, 66 books, 1,189 chapters"),
+	// otherwise the specific problem to fix.
+	message: string;
+	// A chapter file to sample for verse markers, when the layout is ok.
+	sample?: { translation: string; book: string; file: string };
+}
+
+function plural(count: number, word: string): string {
+	return `${count.toLocaleString('en-US')} ${word}${count === 1 ? '' : 's'}`;
+}
+
+// Check a quote-source folder against the layout the verbatim check reads. A
+// translation folder with no valid book folders is reported by name, so the
+// message says what to fix rather than only that something is wrong.
+export function checkQuoteSourceLayout(
+	translations: readonly LayoutTranslation[],
+): LayoutCheck {
+	const usable = translations.filter((t) => isSafeCode(t.name));
+	if (usable.length === 0) {
+		return {
+			ok: false,
+			message:
+				'No translation folders found. Add one folder per translation, named by its code, such as KJV.',
+		};
+	}
+	let books = 0;
+	let chapters = 0;
+	let sample: LayoutCheck['sample'];
+	const empty: string[] = [];
+	for (const translation of usable) {
+		let translationBooks = 0;
+		for (const book of translation.books) {
+			const bookName = bookNameOf(book.name);
+			if (bookName === null) {
+				continue;
+			}
+			const chapterFiles = book.files.filter((file) =>
+				isChapterFileName(file, bookName),
+			);
+			if (chapterFiles.length === 0) {
+				continue;
+			}
+			translationBooks += 1;
+			chapters += chapterFiles.length;
+			sample ??= {
+				translation: translation.name,
+				book: book.name,
+				file: chapterFiles[0] ?? '',
+			};
+		}
+		if (translationBooks === 0) {
+			empty.push(translation.name);
+		}
+		books += translationBooks;
+	}
+	if (books === 0) {
+		return {
+			ok: false,
+			message: `No book folders named like "19 - Psalms" with chapter notes named like "Psalms 23" were found in ${usable.map((t) => t.name).join(', ')}.`,
+		};
+	}
+	// Only translations that contributed a book are counted; the rest are named
+	// separately so the summary never overstates what the check can use.
+	const summary = `${plural(usable.length - empty.length, 'translation')}, ${plural(books, 'book')}, ${plural(chapters, 'chapter')}`;
+	return {
+		ok: true,
+		message:
+			empty.length > 0
+				? `${summary}. No usable books in: ${empty.join(', ')}.`
+				: `${summary}.`,
+		sample,
+	};
 }

@@ -44,6 +44,7 @@ import { verseMatches } from './engine/verbatim';
 import { summarizeCaps } from './engine/verse-caps';
 import { kdpDisclosure } from './engine/kdp';
 import { CorpusService } from './corpus-service';
+import { ReferenceService } from './reference-service';
 import {
 	COMMENT_SPAN_KINDS,
 	SpanKindInfo,
@@ -130,16 +131,11 @@ export interface PlumblineSettings {
 	// Whether flagged phrases are underlined in the editor, and whether the
 	// underline yields to Annoteca's open comments. Interop-contract 5.1.
 	inlineUnderlines: InlineUnderlines;
-	// The vault folder holding the scripture corpus the verbatim check reads,
-	// laid out as engine/corpus-layout.ts describes. Empty means not set up, and
-	// the check says so instead of reporting every verse as missing.
-	scriptureFolder: string;
 }
 
 export const DEFAULT_SETTINGS: PlumblineSettings = {
 	activeProfile: 'devotional-nonfiction',
 	inlineUnderlines: DEFAULT_INLINE_UNDERLINES,
-	scriptureFolder: '',
 };
 
 // Debounce for live re-analysis while typing, in milliseconds.
@@ -151,6 +147,18 @@ export default class PlumblinePlugin extends Plugin {
 
 	private readonly analysis = new AnalysisService(this);
 	private readonly corpus = new CorpusService(this);
+	// Named files and folders that reference-driven checks read, and which groups
+	// use them. See config-model.md, "References".
+	readonly references = new ReferenceService(this);
+	private legacyScriptureFolder = '';
+	private settingTab: PlumblineSettingTab | null = null;
+
+	// A vault event changed a reference (a rename it followed, or a re-check after
+	// a delete or restore). The settings tab caches its rows, so rebuild them or
+	// the References page shows the old path and status.
+	onReferencesChanged(): void {
+		this.settingTab?.update();
+	}
 	private statusBar: HTMLElement | null = null;
 	private refreshTimer: number | null = null;
 	// The most recent markdown analysis, so a panel opened later can populate at
@@ -187,8 +195,11 @@ export default class PlumblinePlugin extends Plugin {
 		await this.loadUserGroups();
 		await this.loadUserChecks();
 		await this.migrateFlatTuning();
+		await this.references.load();
+		await this.migrateScriptureFolder();
 		this.statusBar = this.addStatusBarItem();
-		this.addSettingTab(new PlumblineSettingTab(this.app, this));
+		this.settingTab = new PlumblineSettingTab(this.app, this);
+		this.addSettingTab(this.settingTab);
 
 		// Underline flagged phrases in the editor, live.
 		this.registerEditorExtension(
@@ -280,22 +291,40 @@ export default class PlumblinePlugin extends Plugin {
 		this.addCommand({
 			id: 'show-scripture-usage',
 			name: 'Show scripture usage for the active note',
-			callback: () => {
-				this.showScriptureUsage();
+			checkCallback: (checking) => {
+				if (!this.scriptureCommandAvailable()) {
+					return false;
+				}
+				if (!checking) {
+					this.showScriptureUsage();
+				}
+				return true;
 			},
 		});
 		this.addCommand({
 			id: 'check-quoted-scripture',
 			name: 'Check quoted scripture for the active note',
-			callback: () => {
-				void this.checkScripture();
+			checkCallback: (checking) => {
+				if (!this.scriptureCommandAvailable()) {
+					return false;
+				}
+				if (!checking) {
+					void this.checkScripture();
+				}
+				return true;
 			},
 		});
 		this.addCommand({
 			id: 'check-verse-caps',
 			name: 'Check verse caps across the vault',
-			callback: () => {
-				void this.checkVerseCaps();
+			checkCallback: (checking) => {
+				if (!this.scriptureCommandAvailable()) {
+					return false;
+				}
+				if (!checking) {
+					void this.checkVerseCaps();
+				}
+				return true;
 			},
 		});
 		this.addCommand({
@@ -308,11 +337,76 @@ export default class PlumblinePlugin extends Plugin {
 
 		this.app.workspace.onLayoutReady(() => {
 			this.refresh();
+			// Folder lookups need the vault index, which is complete only once the
+			// layout is ready, so reference validation waits for it. The vault
+			// listeners are registered here too: during load Obsidian fires a
+			// create event for every file, which would re-check each reference
+			// once per file.
+			void this.references.validateAll();
+			this.registerEvent(
+				this.app.vault.on('rename', (file, oldPath) => {
+					void this.references.onVaultRename(file, oldPath);
+				}),
+			);
+			this.registerEvent(
+				this.app.vault.on('create', (file) => {
+					this.references.onVaultChange(file);
+				}),
+			);
+			this.registerEvent(
+				this.app.vault.on('delete', (file) => {
+					this.references.onVaultChange(file);
+				}),
+			);
+			// An edit to a chapter note can add or remove its verse markers. Only
+			// files inside a reference folder queue a re-check, so ordinary
+			// writing costs a path comparison per save.
+			this.registerEvent(
+				this.app.vault.on('modify', (file) => {
+					this.references.onVaultChange(file);
+				}),
+			);
 		});
+	}
+
+	// Move the 0.2.1 "Scripture folder" setting into a "Bible text" reference used
+	// by every group that draws on the scripture pack, starters included (a
+	// starter can use a reference without being forked), then drop the setting.
+	private async migrateScriptureFolder(): Promise<void> {
+		const scriptureGroupIds = allGroups(this.userGroups)
+			.filter((group) => group.extends.includes(SCRIPTURE_PACK_ID))
+			.map((group) => group.id);
+		if (
+			await this.references.migrateScriptureFolder(
+				this.legacyScriptureFolder,
+				scriptureGroupIds,
+			)
+		) {
+			this.legacyScriptureFolder = '';
+			await this.saveSettings();
+		}
+	}
+
+	// The group a note is checked with: its own plumbline-profile frontmatter or
+	// directive when it has one, else the active group.
+	groupForText(text: string): GroupDefinition {
+		const id = fileScope(text).profileId ?? this.settings.activeProfile;
+		return findGroup(id, this.userGroups) ?? fallbackGroup();
+	}
+
+	// Scripture commands show only when the note in front of the writer is checked
+	// with a group that draws on the scripture pack.
+	private scriptureCommandAvailable(): boolean {
+		const view = this.analysis.activeMarkdownView();
+		const group = view
+			? this.groupForText(view.editor.getValue())
+			: this.activeGroup();
+		return group.extends.includes(SCRIPTURE_PACK_ID);
 	}
 
 	onunload(): void {
 		this.clearRefreshTimer();
+		this.references.dispose();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -334,11 +428,14 @@ export default class PlumblinePlugin extends Plugin {
 			inlineUnderlines: isInlineUnderlines(record.inlineUnderlines)
 				? record.inlineUnderlines
 				: DEFAULT_SETTINGS.inlineUnderlines,
-			scriptureFolder:
-				typeof record.scriptureFolder === 'string'
-					? record.scriptureFolder
-					: DEFAULT_SETTINGS.scriptureFolder,
 		};
+		// 0.2.1 stored a flat scriptureFolder setting. It is read once here so
+		// onload can migrate it into a reference; it is no longer a setting, so
+		// the next save drops it from data.json.
+		this.legacyScriptureFolder =
+			typeof record.scriptureFolder === 'string'
+				? record.scriptureFolder
+				: '';
 	}
 
 	async saveSettings(): Promise<void> {
@@ -497,6 +594,7 @@ export default class PlumblinePlugin extends Plugin {
 		};
 		this.userGroups.push(copy);
 		this.settings.activeProfile = copy.id;
+		await this.references.copyAssignments(source.id, copy.id);
 		await this.saveUserGroups();
 		await this.saveSettings();
 		this.applyConfigChange();
@@ -512,6 +610,7 @@ export default class PlumblinePlugin extends Plugin {
 			return;
 		}
 		this.userGroups.splice(index, 1);
+		await this.references.dropAssignments(id);
 		if (this.settings.activeProfile === id) {
 			this.settings.activeProfile = DEFAULT_SETTINGS.activeProfile;
 		}
@@ -603,6 +702,9 @@ export default class PlumblinePlugin extends Plugin {
 		};
 		this.userGroups.push(copy);
 		this.settings.activeProfile = copy.id;
+		// The fork keeps checking against the same references. Not awaited: this
+		// runs inside a synchronous fork, and the caller saves groups right after.
+		void this.references.copyAssignments(active.id, copy.id);
 		new Notice(`Plumbline: made an editable copy of ${active.name}.`);
 		return copy;
 	}
@@ -1388,8 +1490,10 @@ export default class PlumblinePlugin extends Plugin {
 		new Notice(`Scripture usage\n${lines.join('\n')}`);
 	}
 
-	// Compare each quoted verse against the Bible text in the scripture folder and report
-	// possible mismatches. Verses it cannot find there are skipped.
+	// Compare each quoted verse against the quote-source references the note's
+	// group uses, and report possible mismatches. A verse none of them contains is
+	// skipped. With several sources, a quote that matches any one of them passes;
+	// one that matches none is listed with every source it was checked against.
 	private async checkScripture(): Promise<void> {
 		try {
 			const view = this.analysis.activeMarkdownView();
@@ -1397,47 +1501,59 @@ export default class PlumblinePlugin extends Plugin {
 				new Notice('Plumbline: open a note first.');
 				return;
 			}
-			const quotes = scriptureQuotes(view.editor.getValue());
+			const text = view.editor.getValue();
+			const quotes = scriptureQuotes(text);
 			if (quotes.length === 0) {
 				new Notice('Plumbline: no quoted scripture in this note.');
 				return;
 			}
-			if (this.settings.scriptureFolder.trim().length === 0) {
+			const group = this.groupForText(text);
+			const sources = this.references.quoteSourceFolders(group.id);
+			if (sources.length === 0) {
 				new Notice(
-					'Plumbline: choose a scripture folder in settings to check quoted verses.',
-				);
-				return;
-			}
-			if (!this.corpus.rootFolder()) {
-				new Notice(
-					`Plumbline: the scripture folder "${this.settings.scriptureFolder}" was not found.`,
+					`Plumbline: ${group.name} has no valid quote source. Add one under References in settings, then turn it on for this group.`,
 				);
 				return;
 			}
 			let checked = 0;
 			const mismatches: string[] = [];
 			for (const item of quotes) {
-				const corpusText = await this.corpus.verseText(item.citation);
-				if (corpusText === null) {
+				const found: { name: string; text: string }[] = [];
+				for (const source of sources) {
+					const verse = await this.corpus.verseText(
+						source.folder,
+						item.citation,
+					);
+					if (verse !== null) {
+						found.push({
+							name: source.reference.name,
+							text: verse,
+						});
+					}
+				}
+				if (found.length === 0) {
 					continue;
 				}
 				checked++;
-				if (!verseMatches(item.quote, corpusText)) {
+				if (!found.some((f) => verseMatches(item.quote, f.text))) {
 					const c = item.citation;
-					mismatches.push(`${c.book} ${c.chapter}:${c.verseStart}`);
+					const against = found.map((f) => f.name).join(', ');
+					mismatches.push(
+						`${c.book} ${c.chapter}:${c.verseStart} (${against})`,
+					);
 				}
 			}
 			if (checked === 0) {
 				new Notice(
-					'Plumbline: could not find these verses in the scripture folder.',
+					`Plumbline: could not find these verses in ${sources.map((s) => s.reference.name).join(', ')}.`,
 				);
 			} else if (mismatches.length === 0) {
 				new Notice(
-					`Plumbline: ${checked} quoted verses checked, all match the scripture folder.`,
+					`Plumbline: ${checked} quoted verses checked, all match.`,
 				);
 			} else {
 				new Notice(
-					`Plumbline: ${mismatches.length} of ${checked} may not match the scripture folder:\n${mismatches.slice(0, 6).join('\n')}`,
+					`Plumbline: ${mismatches.length} of ${checked} may not match:\n${mismatches.slice(0, 6).join('\n')}`,
 				);
 			}
 		} catch (err) {
@@ -1446,19 +1562,22 @@ export default class PlumblinePlugin extends Plugin {
 		}
 	}
 
-	// Aggregate scripture citations across the whole vault (excluding the
-	// scripture folder, whose verses are the reference text, not reproductions)
-	// and check each translation's distinct-verse total against its cap.
+	// Aggregate scripture citations across the whole vault (excluding every
+	// quote-source reference folder, whose verses are the reference text, not
+	// reproductions) and check each translation's distinct-verse total against
+	// its cap.
 	private async checkVerseCaps(): Promise<void> {
 		try {
-			const corpusRoot = this.corpus.rootFolder();
-			const corpusPrefix = corpusRoot ? `${corpusRoot.path}/` : null;
+			const sourcePrefixes = this.references
+				.allQuoteSourcePaths()
+				.map((path) => `${path}/`);
 			const files = this.app.vault
 				.getMarkdownFiles()
 				.filter(
 					(file) =>
-						corpusPrefix === null ||
-						!file.path.startsWith(corpusPrefix),
+						!sourcePrefixes.some((prefix) =>
+							file.path.startsWith(prefix),
+						),
 				);
 			// Copyright caps count reproduced verses, so use quoted scripture
 			// only, not bare cross-references.
