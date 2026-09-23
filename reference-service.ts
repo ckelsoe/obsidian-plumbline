@@ -61,6 +61,10 @@ export class ReferenceService {
 	private readonly statuses = new Map<string, ReferenceStatus>();
 	// Parsed terms per term-list reference, refreshed whenever it is validated.
 	private readonly terms = new Map<string, TermEntry[]>();
+	// Merged term rules per group. Every lint pass asks for them, so they are
+	// built once and dropped whenever a term list, a reference's name or type,
+	// or a group's choice of references changes.
+	private readonly ruleCache = new Map<string, Rule[]>();
 	private saveQueue: Promise<void> = Promise.resolve();
 	private readonly pending = new Set<string>();
 	private timer: number | null = null;
@@ -95,6 +99,7 @@ export class ReferenceService {
 	}
 
 	async load(): Promise<void> {
+		this.ruleCache.clear();
 		try {
 			const adapter = this.plugin.app.vault.adapter;
 			this.store = (await adapter.exists(REFERENCES_PATH))
@@ -270,6 +275,7 @@ export class ReferenceService {
 		} else {
 			this.terms.delete(reference.id);
 		}
+		this.ruleCache.clear();
 	}
 
 	async create(): Promise<string> {
@@ -292,6 +298,7 @@ export class ReferenceService {
 			return;
 		}
 		reference.name = name;
+		this.ruleCache.clear();
 		await this.save();
 		// A term finding names its list, so open notes re-lint with the new name.
 		this.plugin.applyConfigChange();
@@ -333,6 +340,7 @@ export class ReferenceService {
 
 	async delete(id: string): Promise<void> {
 		removeReference(this.store, id);
+		this.ruleCache.clear();
 		this.statuses.delete(id);
 		this.terms.delete(id);
 		await this.save();
@@ -345,6 +353,7 @@ export class ReferenceService {
 		on: boolean,
 	): Promise<void> {
 		setAssigned(this.store, groupId, referenceId, on);
+		this.ruleCache.clear();
 		await this.save();
 		this.plugin.applyConfigChange();
 	}
@@ -359,6 +368,7 @@ export class ReferenceService {
 			return;
 		}
 		this.store.assignments[toGroupId] = [...from];
+		this.ruleCache.clear();
 		await this.save();
 	}
 
@@ -367,6 +377,7 @@ export class ReferenceService {
 			return;
 		}
 		delete this.store.assignments[groupId];
+		this.ruleCache.clear();
 		await this.save();
 	}
 
@@ -454,11 +465,17 @@ export class ReferenceService {
 	// The term rules for a group: every valid term list it uses, merged so a term
 	// in two lists is one rule naming both, with every suggestion kept.
 	termRules(groupId: string): Rule[] {
+		const cached = this.ruleCache.get(groupId);
+		if (cached) {
+			return cached;
+		}
 		const lists = this.forGroup(groupId)
 			.filter((r) => r.type === 'term-list')
 			.map((r) => ({ name: r.name, entries: this.terms.get(r.id) ?? [] }))
 			.filter((list) => list.entries.length > 0);
-		return lists.length > 0 ? buildTermRules(lists) : [];
+		const rules = lists.length > 0 ? buildTermRules(lists) : [];
+		this.ruleCache.set(groupId, rules);
+		return rules;
 	}
 
 	// Every quote-source folder in the vault, whichever group uses it. Their notes

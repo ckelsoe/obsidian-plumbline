@@ -271,3 +271,29 @@ describe('review fixes', () => {
 		).toEqual([14]);
 	});
 });
+
+describe('table headers', () => {
+	it('matches header keywords as whole words, allowing an ending', () => {
+		const md =
+			'| Jargon | Usage note | Plain replacement |\n|---|---|---|\n| utilize | common in memos | use |\n';
+		expect(parseTermList(md)).toEqual([
+			{ term: 'utilize', replacement: 'use', caseSensitive: false },
+		]);
+	});
+
+	it('does not read "Overused", "Essay", or "Copyright" as a use column', () => {
+		for (const header of ['Overused', 'Essay', 'Copyright', 'Cause']) {
+			const md = `| Avoid | ${header} |\n|---|---|\n| synergy | x |\n`;
+			expect(parseTermList(md)).toEqual([
+				{ term: 'synergy', caseSensitive: false },
+			]);
+		}
+	});
+
+	it('still reads "Preferred" and "Don’t use" headers', () => {
+		const md = '| Preferred | Don’t use |\n|---|---|\n| email | e-mail |\n';
+		expect(parseTermList(md)).toEqual([
+			{ term: 'e-mail', replacement: 'email', caseSensitive: false },
+		]);
+	});
+});

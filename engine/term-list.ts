@@ -49,18 +49,52 @@ const USE_HEADERS = [
 	'right',
 ];
 
-function cleanHeader(cell: string): string {
-	return cell.replace(/[*_`]/g, '').trim().toLowerCase();
+// A header cell as lower-case words. Apostrophes stay inside a word ("don't");
+// everything else separates words.
+function headerWords(cell: string): string[] {
+	const words: string[] = [];
+	let word = '';
+	for (const char of cell.toLowerCase().replace(/[’‘]/g, "'")) {
+		if ((char >= 'a' && char <= 'z') || char === "'") {
+			word += char;
+		} else if (word.length > 0) {
+			words.push(word);
+			word = '';
+		}
+	}
+	if (word.length > 0) {
+		words.push(word);
+	}
+	return words;
+}
+
+// Does the header contain the keyword as whole words? The keyword's last word
+// may take an ending ("replace" matches "Replacement", "prefer" matches
+// "Preferred"), but every word must start at a word start, so "use" does not
+// match "Usage", "Overused", or "Cause", nor "right" match "Copyright".
+function hasHeaderWord(words: readonly string[], keyword: string): boolean {
+	const parts = keyword.split(' ');
+	const last = parts.length - 1;
+	for (let i = 0; i + last < words.length; i++) {
+		const matches = parts.every((part, j) => {
+			const word = words[i + j] ?? '';
+			return j === last ? word.startsWith(part) : word === part;
+		});
+		if (matches) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function isAvoidHeader(cell: string): boolean {
-	const header = cleanHeader(cell);
-	return AVOID_HEADERS.some((word) => header.includes(word));
+	const words = headerWords(cell);
+	return AVOID_HEADERS.some((keyword) => hasHeaderWord(words, keyword));
 }
 
 function isUseHeader(cell: string): boolean {
-	const header = cleanHeader(cell);
-	return USE_HEADERS.some((word) => header.includes(word));
+	const words = headerWords(cell);
+	return USE_HEADERS.some((keyword) => hasHeaderWord(words, keyword));
 }
 
 function splitRow(line: string): string[] {
