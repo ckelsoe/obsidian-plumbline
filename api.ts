@@ -38,7 +38,7 @@ export class PlumblineApiImpl implements PlumblineApi {
 		// Computed fresh rather than served from the plugin's cached result. The
 		// cache only ever holds the ACTIVE note, so serving it would answer a
 		// question about one note with another note's findings.
-		const result = lint(text, this.plugin.resolvedConfig(text));
+		const result = lint(text, this.plugin.resolvedConfig(text, path));
 		return result.findings.map(toApiFinding);
 	}
 

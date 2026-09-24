@@ -19,6 +19,7 @@ import {
 	gutter,
 	hoverTooltip,
 } from '@codemirror/view';
+import { editorInfoField } from 'obsidian';
 import { lint } from './engine/lint';
 import { Diagnostic, ResolvedConfig, Severity } from './engine/types';
 import { coverageSegments, segmentAt } from './underline-coverage';
@@ -117,7 +118,9 @@ function findingsIn(state: EditorState): Diagnostic[] {
 
 // Runs the engine, debounced, and pushes the result into the field. The only
 // caller of lint() in the editor path.
-function findingsPass(getConfig: (text: string) => ResolvedConfig): Extension {
+function findingsPass(
+	getConfig: (text: string, path?: string) => ResolvedConfig,
+): Extension {
 	return ViewPlugin.fromClass(
 		class {
 			private timer: number | null = null;
@@ -171,8 +174,11 @@ function findingsPass(getConfig: (text: string) => ResolvedConfig): Extension {
 				// The text goes to getConfig as well as to lint. The note's own
 				// `plumbline-profile` selects which packs are active, and that
 				// has to be decided before the config is resolved.
+				// The note's path lets a relative wikilink resolve from its folder.
 				const text = this.view.state.doc.toString();
-				const result = lint(text, getConfig(text));
+				const path = this.view.state.field(editorInfoField, false)?.file
+					?.path;
+				const result = lint(text, getConfig(text, path));
 				this.view.dispatch({
 					effects: setFindings.of(result.diagnostics),
 				});
@@ -743,7 +749,7 @@ export interface DecorationActions {
 // `getConfig` is read on each pass so the active profile and any vault overrides
 // are current.
 export function plumblineDecorations(
-	getConfig: (text: string) => ResolvedConfig,
+	getConfig: (text: string, path?: string) => ResolvedConfig,
 	actions: DecorationActions,
 	yieldTo: YieldSource,
 ): Extension {

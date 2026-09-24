@@ -1,4 +1,11 @@
-import { normalizePath, Notice, TAbstractFile, TFile, TFolder } from 'obsidian';
+import {
+	normalizePath,
+	Notice,
+	TAbstractFile,
+	TFile,
+	TFolder,
+	Vault,
+} from 'obsidian';
 import {
 	checkQuoteSourceLayout,
 	LayoutTranslation,
@@ -17,6 +24,11 @@ import {
 	setAssigned,
 	uniqueReferenceId,
 } from './engine/reference-store';
+import {
+	buildSourceNoteIndex,
+	prepareSourceText,
+	SourceNoteIndex,
+} from './engine/source-quotes';
 import { parseChapter } from './engine/verbatim';
 import {
 	buildTermRules,
@@ -47,6 +59,20 @@ function storedPath(path: string): string {
 // How long after the last vault change under a reference to re-check it.
 const REVALIDATE_DELAY = 500;
 
+// One note read from a source-notes folder, its text prepared for searching.
+interface ReadSourceNote {
+	path: string;
+	title: string;
+	text: string;
+}
+
+// What one validation pass read, kept so linting never reads a file itself.
+interface CheckResult {
+	status: ReferenceStatus;
+	entries?: TermEntry[];
+	notes?: ReadSourceNote[];
+}
+
 function childFolders(folder: TFolder): TFolder[] {
 	return folder.children.filter(
 		(child): child is TFolder => child instanceof TFolder,
@@ -65,11 +91,22 @@ export class ReferenceService {
 	// built once and dropped whenever a term list, a reference's name or type,
 	// or a group's choice of references changes.
 	private readonly ruleCache = new Map<string, Rule[]>();
+	// Notes per source-notes reference, and the merged index per group, kept
+	// and dropped like the terms and the rule cache.
+	private readonly sourceNotes = new Map<string, ReadSourceNote[]>();
+	private readonly sourceIndexCache = new Map<string, SourceNoteIndex>();
 	private saveQueue: Promise<void> = Promise.resolve();
 	private readonly pending = new Set<string>();
 	private timer: number | null = null;
 
 	constructor(private readonly plugin: PlumblinePlugin) {}
+
+	// Every lint-time view built from the references (term rules, the source
+	// note index) depends on the same inputs, so they are dropped together.
+	private dropCaches(): void {
+		this.ruleCache.clear();
+		this.sourceIndexCache.clear();
+	}
 
 	list(): Reference[] {
 		return [...this.store.references];
@@ -99,7 +136,7 @@ export class ReferenceService {
 	}
 
 	async load(): Promise<void> {
-		this.ruleCache.clear();
+		this.dropCaches();
 		try {
 			const adapter = this.plugin.app.vault.adapter;
 			this.store = (await adapter.exists(REFERENCES_PATH))
@@ -162,13 +199,79 @@ export class ReferenceService {
 	// sampled chapter note carries ^vN verse markers. For a term list it also
 	// returns the terms read in that same pass, so the caller never needs a
 	// second read that could race a path change.
-	private async check(
-		reference: Reference,
-	): Promise<{ status: ReferenceStatus; entries?: TermEntry[] }> {
+	private async check(reference: Reference): Promise<CheckResult> {
 		if (reference.type === 'term-list') {
 			return this.checkTermList(reference);
 		}
+		if (reference.type === 'source-notes') {
+			return this.checkSourceNotes(reference);
+		}
 		return { status: await this.checkQuoteSource(reference) };
+	}
+
+	// A source-notes folder is valid when it holds at least one note. Every note
+	// in it (subfolders included) is read in this pass and kept, so a cited
+	// quote is checked without reading a file while the writer types.
+	private async checkSourceNotes(reference: Reference): Promise<CheckResult> {
+		const path = reference.path.trim();
+		if (path.length === 0) {
+			return {
+				status: { state: 'invalid', message: 'Choose a folder.' },
+			};
+		}
+		const vault = this.plugin.app.vault;
+		const folder = vault.getFolderByPath(normalizePath(path));
+		if (!folder) {
+			return {
+				status: {
+					state: 'missing',
+					message: `Folder not found: ${path}`,
+				},
+			};
+		}
+		const files: TFile[] = [];
+		Vault.recurseChildren(folder, (child) => {
+			if (child instanceof TFile && child.extension === 'md') {
+				files.push(child);
+			}
+		});
+		if (files.length === 0) {
+			return {
+				status: {
+					state: 'invalid',
+					message:
+						'No notes in this folder. Add the notes your quotes cite, such as interview transcripts.',
+				},
+			};
+		}
+		// A note deleted or unreadable between listing and reading is left out
+		// rather than failing the whole folder; it is read again on the next
+		// check, which its own vault event triggers.
+		const read = await Promise.all(
+			files.map(async (file): Promise<ReadSourceNote | null> => {
+				try {
+					return {
+						path: file.path,
+						title: file.basename,
+						text: prepareSourceText(await vault.cachedRead(file)),
+					};
+				} catch (err) {
+					console.error(err);
+					return null;
+				}
+			}),
+		);
+		const notes = read.filter((n): n is ReadSourceNote => n !== null);
+		if (notes.length === 0) {
+			return {
+				status: {
+					state: 'invalid',
+					message: 'Could not read any note in this folder.',
+				},
+			};
+		}
+		const count = `${notes.length} source note${notes.length === 1 ? '' : 's'}.`;
+		return { status: { state: 'ok', message: count }, notes };
 	}
 
 	private async checkQuoteSource(
@@ -222,9 +325,7 @@ export class ReferenceService {
 	// status.
 	// A term list is valid when its note exists and at least one term parses
 	// from it. The parsed terms are kept, so linting never re-reads the file.
-	private async checkTermList(
-		reference: Reference,
-	): Promise<{ status: ReferenceStatus; entries?: TermEntry[] }> {
+	private async checkTermList(reference: Reference): Promise<CheckResult> {
 		const path = reference.path.trim();
 		if (path.length === 0) {
 			return { status: { state: 'invalid', message: 'Choose a note.' } };
@@ -261,7 +362,22 @@ export class ReferenceService {
 	private async revalidate(reference: Reference): Promise<void> {
 		const path = reference.path;
 		const type = reference.type;
-		const { status, entries } = await this.check(reference);
+		// A check that throws (a file read failing mid-scan) marks this
+		// reference invalid instead of aborting the caller's loop over every
+		// reference and its refresh.
+		let result: CheckResult;
+		try {
+			result = await this.check(reference);
+		} catch (err) {
+			console.error(err);
+			result = {
+				status: {
+					state: 'invalid',
+					message: 'Could not read this reference. Check it again.',
+				},
+			};
+		}
+		const { status, entries, notes } = result;
 		if (
 			this.get(reference.id) !== reference ||
 			reference.path !== path ||
@@ -275,7 +391,12 @@ export class ReferenceService {
 		} else {
 			this.terms.delete(reference.id);
 		}
-		this.ruleCache.clear();
+		if (notes !== undefined) {
+			this.sourceNotes.set(reference.id, notes);
+		} else {
+			this.sourceNotes.delete(reference.id);
+		}
+		this.dropCaches();
 	}
 
 	async create(): Promise<string> {
@@ -298,7 +419,7 @@ export class ReferenceService {
 			return;
 		}
 		reference.name = name;
-		this.ruleCache.clear();
+		this.dropCaches();
 		await this.save();
 		// A term finding names its list, so open notes re-lint with the new name.
 		this.plugin.applyConfigChange();
@@ -340,9 +461,10 @@ export class ReferenceService {
 
 	async delete(id: string): Promise<void> {
 		removeReference(this.store, id);
-		this.ruleCache.clear();
+		this.dropCaches();
 		this.statuses.delete(id);
 		this.terms.delete(id);
+		this.sourceNotes.delete(id);
 		await this.save();
 		this.plugin.applyConfigChange();
 	}
@@ -353,7 +475,7 @@ export class ReferenceService {
 		on: boolean,
 	): Promise<void> {
 		setAssigned(this.store, groupId, referenceId, on);
-		this.ruleCache.clear();
+		this.dropCaches();
 		await this.save();
 		this.plugin.applyConfigChange();
 	}
@@ -368,7 +490,7 @@ export class ReferenceService {
 			return;
 		}
 		this.store.assignments[toGroupId] = [...from];
-		this.ruleCache.clear();
+		this.dropCaches();
 		await this.save();
 	}
 
@@ -377,7 +499,7 @@ export class ReferenceService {
 			return;
 		}
 		delete this.store.assignments[groupId];
-		this.ruleCache.clear();
+		this.dropCaches();
 		await this.save();
 	}
 
@@ -478,11 +600,36 @@ export class ReferenceService {
 		return rules;
 	}
 
-	// Every quote-source folder in the vault, whichever group uses it. Their notes
-	// are reference text, not quotations, so the verse-cap count leaves them out.
+	// The notes a group's cited quotes are checked against: every valid
+	// source-notes folder it uses, merged by note name, each note naming its
+	// reference. Undefined when the group uses none, so lint skips the check.
+	sourceNoteIndex(groupId: string): SourceNoteIndex | undefined {
+		const cached = this.sourceIndexCache.get(groupId);
+		if (cached) {
+			return cached.size > 0 ? cached : undefined;
+		}
+		const folders = this.forGroup(groupId)
+			.filter((r) => r.type === 'source-notes')
+			.map((r) => ({
+				reference: r.name,
+				notes: this.sourceNotes.get(r.id) ?? [],
+			}))
+			.filter((folder) => folder.notes.length > 0);
+		const index = buildSourceNoteIndex(folders);
+		this.sourceIndexCache.set(groupId, index);
+		return index.size > 0 ? index : undefined;
+	}
+
+	// Every quote-source folder in the vault (scripture layout or any notes),
+	// whichever group uses it. Their notes are reference text, not quotations,
+	// so the verse-cap count leaves them out.
 	allQuoteSourcePaths(): string[] {
 		return this.store.references
-			.filter((r) => r.type === 'quote-source' && r.path.length > 0)
+			.filter(
+				(r) =>
+					(r.type === 'quote-source' || r.type === 'source-notes') &&
+					r.path.length > 0,
+			)
 			.map((r) => normalizePath(r.path));
 	}
 

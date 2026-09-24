@@ -204,7 +204,7 @@ export default class PlumblinePlugin extends Plugin {
 		// Underline flagged phrases in the editor, live.
 		this.registerEditorExtension(
 			plumblineDecorations(
-				(text) => this.resolvedConfig(text),
+				(text, path) => this.resolvedConfig(text, path),
 				{
 					disableRule: (slug, view) => {
 						void this.disableRuleForView(slug, view);
@@ -456,7 +456,7 @@ export default class PlumblinePlugin extends Plugin {
 	// text should pass it: the note's own `plumbline-profile` frontmatter or
 	// `profile` directive selects which pack set is active, and that decision has
 	// to happen before the config is resolved rather than inside lint().
-	resolvedConfig(text?: string): ResolvedConfig {
+	resolvedConfig(text?: string, notePath?: string): ResolvedConfig {
 		const profile =
 			(text !== undefined ? fileScope(text).profileId : undefined) ??
 			this.settings.activeProfile;
@@ -469,11 +469,18 @@ export default class PlumblinePlugin extends Plugin {
 		// Term lists the note's group uses add their own rules. They come from
 		// references (vault files), not from packs, so they join here rather
 		// than inside the pure resolver.
+		// Source-note folders feed the cited-quote check the same way.
 		const group = findGroup(profile, this.userGroups) ?? fallbackGroup();
 		const termRules = this.references.termRules(group.id);
-		return termRules.length > 0
-			? { ...config, rules: [...config.rules, ...termRules] }
-			: config;
+		const sourceNotes = this.references.sourceNoteIndex(group.id);
+		return {
+			...config,
+			...(termRules.length > 0
+				? { rules: [...config.rules, ...termRules] }
+				: {}),
+			...(sourceNotes ? { sourceNotes } : {}),
+			...(sourceNotes && notePath !== undefined ? { notePath } : {}),
+		};
 	}
 
 	private async loadVaultConfig(): Promise<void> {
@@ -1349,7 +1356,7 @@ export default class PlumblinePlugin extends Plugin {
 				return;
 			}
 			const text = view.editor.getValue();
-			const result = lint(text, this.resolvedConfig(text));
+			const result = lint(text, this.resolvedConfig(text, file.path));
 			const requests = result.diagnostics
 				.map((d) =>
 					promoteRequestFor(d, text.slice(d.start, d.end), ''),
@@ -2090,7 +2097,10 @@ export default class PlumblinePlugin extends Plugin {
 			for (const file of files) {
 				try {
 					const text = await this.app.vault.cachedRead(file);
-					const result = lint(text, this.resolvedConfig(text));
+					const result = lint(
+						text,
+						this.resolvedConfig(text, file.path),
+					);
 					const report = buildReport(
 						file.path,
 						this.resolvedConfig(text).profileId,

@@ -4,6 +4,7 @@ import { fileScope } from './file-scope';
 import { withDiagnosticKeys } from './finding-key';
 import { applyRules } from './apply-rules';
 import { applyHeuristics, heuristicConfidence } from './heuristics';
+import { checkSourceQuotes, SOURCE_QUOTE_SLUG } from './source-quotes';
 import { CONFIDENCE, confidenceFor, rollup } from './rollup';
 import { splitSentencesWithOffsets } from './sentences';
 import { wordCount, mean, coefficientOfVariation } from './sentence-stats';
@@ -52,6 +53,15 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 					disabled,
 					config.severityBySlug,
 				),
+				// Cited quotes are read from the masked prose, so a quote inside
+				// code or a skipped region is never checked.
+				...(config.sourceNotes && !disabled.has(SOURCE_QUOTE_SLUG)
+					? checkSourceQuotes(
+							prose,
+							config.sourceNotes,
+							config.notePath,
+						)
+					: []),
 			];
 	diagnostics.sort((a, b) => a.start - b.start || a.end - b.end);
 	// Keyed once, here, so the hover, the panel, the report and a promoted
@@ -64,6 +74,16 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 	const mechanical = new Map(config.rules.map((r) => [r.slug, r]));
 	const confidenceOf = (slug: string): number => {
 		const rule = mechanical.get(slug);
+		// A cited quote is compared word for word with its source, so it is as
+		// certain as a phrase rule, though it is not one.
+		if (slug === SOURCE_QUOTE_SLUG) {
+			return confidenceFor(
+				slug,
+				undefined,
+				CONFIDENCE.mechanical,
+				config.confidenceBySlug,
+			);
+		}
 		if (rule !== undefined) {
 			return confidenceFor(
 				slug,
