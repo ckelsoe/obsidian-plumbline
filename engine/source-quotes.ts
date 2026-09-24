@@ -661,7 +661,10 @@ function notesFor(
 	}
 	const slash = key.lastIndexOf('/');
 	const candidates = index.get(slash === -1 ? key : key.slice(slash + 1));
-	if (!candidates || slash === -1) {
+	// A resolved relative link is a full vault path even without a slash
+	// ("../Interview" from "Drafts/A.md" is "Interview", at the vault root), so
+	// it always takes the exact-path check below.
+	if (!candidates || (slash === -1 && !relative)) {
 		return candidates ?? [];
 	}
 	return candidates.filter((note) =>

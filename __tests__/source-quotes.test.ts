@@ -320,6 +320,12 @@ describe('checkSourceQuotes', () => {
 				'Project/Drafts/Article.md',
 			),
 		).toEqual([]);
+		// A relative link that lands at the vault root must match a root note
+		// exactly, not any note of that name.
+		const atRoot = '"we shipped early" ([[../2024-03-02 Interview]])';
+		expect(checkSourceQuotes(atRoot, interviews, 'Drafts/A.md')).toEqual(
+			[],
+		);
 		// Without the citing note's path it cannot be resolved.
 		expect(checkSourceQuotes(relative, interviews)).toEqual([]);
 	});
@@ -398,6 +404,22 @@ describe('lint with source notes', () => {
 	it('reports a misquote only when the group has source notes', () => {
 		expect(flagged(misquote, base)).toBe(false);
 		expect(flagged(misquote, withSources)).toBe(true);
+	});
+
+	it('checks a quote whose link looks like a scripture citation', () => {
+		const scripture = resolveConfig('devotional-nonfiction');
+		const colonNotes = index([
+			{
+				reference: 'Interviews',
+				notes: [['S/Interview 3:16.md', 'We shipped late.']],
+			},
+		]);
+		expect(
+			flagged('"we shipped early" ([[Interview 3:16]])', {
+				...scripture,
+				sourceNotes: colonNotes,
+			}),
+		).toBe(true);
 	});
 
 	it('does not check a quote inside code', () => {
