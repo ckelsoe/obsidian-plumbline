@@ -40,7 +40,7 @@ To set one up:
 1. Open **Settings > Plumbline > References**, click **New reference**, pick its type, and choose the note or folder. Plumbline reads it straight away and shows what it found, such as "42 terms, 30 with a replacement." or "12 names (3 aliases).", or what to fix.
 2. Open **Manage groups**, pick the group you write with, and turn the reference on under **References**. A starter group can use a reference too; you do not need to copy it first.
 
-Each kind of writing can have its own references: a devotional book, a company blog, and a novel can each use a different set. If you rename or move a reference, Plumbline follows it. When two references disagree, the hover shows every suggestion, each labelled with where it came from, and you choose.
+Each kind of writing can have its own references: a devotional book, a company blog, and a novel can each use a different set. If you rename or move a reference, Plumbline follows it. When two term lists or name lists disagree, the hover shows every suggestion, each labelled with where it came from, and you choose.
 
 The exact file formats and matching rules for every type are in [docs/references.md](./docs/references.md). A quick look at each:
 

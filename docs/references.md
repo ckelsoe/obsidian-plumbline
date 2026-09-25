@@ -8,7 +8,7 @@ Every type follows the same rules for setup and upkeep:
 - Plumbline checks a reference the moment you choose its note or folder, and shows what it found ("42 terms, 30 with a replacement.", "12 names (3 aliases).") or what to fix.
 - If you rename or move the note or folder, the reference follows it. If you delete it, the reference shows as Missing and is skipped quietly.
 - A group can use several references, including several of one type.
-- When two references disagree, you see every suggestion, each labelled with the reference it came from, and you choose. Plumbline never picks for you. The same term or name in two references is one finding naming both.
+- When two term lists or name lists disagree, you see every suggestion, each labelled with the reference it came from, and you choose. Plumbline never picks for you. The same term or name in two references is one finding naming both. Quote sources work differently: a quote passes if it is in any source note it could mean (see [Quote source (any notes)](#quote-source-any-notes)).
 - Any finding can be turned off for a single note from its hover.
 
 ## Term list
