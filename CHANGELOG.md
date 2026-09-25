@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-09-25
+
 ### Changed
 - The README explains references as one idea (check your prose against your own style guide, sources, scripture, or character notes) with a short example of each. The full format and matching rules for every reference type moved to `docs/references.md`. The help text for each reference type in settings now points there.
 - The plugin description no longer promises a calibrated rhythm baseline, which Plumbline does not have. The rhythm number is reported as it is.
