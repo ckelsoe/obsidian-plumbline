@@ -1,5 +1,6 @@
 import { MarkdownView, TFile } from 'obsidian';
 import { lint } from './engine/lint';
+import { toEditorText } from './engine/editor-text';
 import { fileScope, isScopeId } from './engine/file-scope';
 import {
 	ApiFinding,
@@ -91,22 +92,24 @@ export class PlumblineApiImpl implements PlumblineApi {
 		return this.plugin.settings.activeProfile;
 	}
 
-	// The live editor text when the note is open, the file otherwise.
+	// The live editor text when the note is open, the file otherwise, converted
+	// to editor text so a CRLF or lone-CR note gets the positions the editor
+	// would give it (contract: every position counts editor-text characters).
 	//
 	// Order matters. Reading the vault first would resolve against the stale
 	// on-disk copy while the editor shows unsaved edits, which is the same trap
 	// the contract records for Annoteca's `anchorsFor`: the offsets would be
 	// right for a document nobody is looking at.
-	private textFor(path: string): Promise<string | null> {
+	private async textFor(path: string): Promise<string | null> {
 		const open = this.openEditorText(path);
 		if (open !== null) {
-			return Promise.resolve(open);
+			return open;
 		}
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
-			return Promise.resolve(null);
+			return null;
 		}
-		return this.plugin.app.vault.cachedRead(file);
+		return toEditorText(await this.plugin.app.vault.cachedRead(file));
 	}
 
 	private openEditorText(path: string): string | null {
