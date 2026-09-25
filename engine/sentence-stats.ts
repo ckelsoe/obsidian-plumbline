@@ -73,8 +73,9 @@ export function coefficientOfVariation(values: number[]): number {
 
 // Coefficient of variation of sentence length. This is "burstiness". Human prose
 // runs high (roughly 0.6 to 1.2); machine prose clusters low (roughly 0.2 to
-// 0.4). The bands are calibrated per profile against the writer's own
-// hand-written baseline, never hardcoded as a verdict.
+// 0.4). Plumbline reports the number and draws no verdict from it: there are
+// no bands yet, and any added later belong calibrated per profile against the
+// writer's own hand-written baseline, never hardcoded.
 export function burstiness(text: string): number {
 	return coefficientOfVariation(sentenceLengths(text));
 }

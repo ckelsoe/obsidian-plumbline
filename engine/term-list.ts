@@ -3,7 +3,7 @@ import { FixOption, Rule } from './types';
 // Term lists: a voice or style file that names terms to avoid and, where there
 // is one, the term to use instead. The format is plain Markdown, the same tables
 // the brand-voice skill's brand.md and phrases.md use, so an existing brand file
-// works as-is. See the README, "Brand voice and style: term lists".
+// works as-is. See docs/references.md, "Term list".
 //
 // Two shapes are read, anywhere in the file:
 //
