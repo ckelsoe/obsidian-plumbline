@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-25
+
 ### Fixed
 - Findings for a closed note saved with Windows (CRLF) or old Mac (CR) line endings now give the same positions and line numbers the editor would. This affects the plugin API that other plugins, such as Annoteca, ask for findings, and the "Write flags reports for every note in this folder" command. Before, a CRLF note's positions were one character too high for every line break above the finding.
 
