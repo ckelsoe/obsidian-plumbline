@@ -3,9 +3,10 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/ckelsoe/obsidian-plumbline/ci.yml?branch=main&label=CI&logo=github)](https://github.com/ckelsoe/obsidian-plumbline/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/actions/workflow/status/ckelsoe/obsidian-plumbline/release.yml?label=Release&logo=github)](https://github.com/ckelsoe/obsidian-plumbline/actions/workflows/release.yml) [![GitHub Downloads](https://img.shields.io/github/downloads/ckelsoe/obsidian-plumbline/total?logo=github&label=Downloads)](https://github.com/ckelsoe/obsidian-plumbline/releases) [![GitHub Stars](https://img.shields.io/github/stars/ckelsoe/obsidian-plumbline?style=flat&logo=github&label=Stars)](https://github.com/ckelsoe/obsidian-plumbline) [![Obsidian](https://img.shields.io/badge/Obsidian-v1.13.0%2B-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md) [![License](https://img.shields.io/github/license/ckelsoe/obsidian-plumbline)](https://github.com/ckelsoe/obsidian-plumbline/blob/main/LICENSE) [![Latest Release](https://img.shields.io/github/v/release/ckelsoe/obsidian-plumbline?label=Latest)](https://github.com/ckelsoe/obsidian-plumbline/releases/latest)
 
-Flag AI-shaped writing, and check your prose against your own style guide, sources, and character names.
+> [!WARNING]
+> **Experimental.** Plumbline is in an experimental state. Its checks, defaults, and settings are subject to refinement or change based on feedback and real-world use. It flags, it never blocks or edits your prose on its own. If you hit a bug or a wrong flag, please [open an issue](https://github.com/ckelsoe/obsidian-plumbline/issues); early reports shape what gets refined first.
 
-> **Early release, under active development.** Plumbline is usable but young. Expect rough edges, and expect settings and defaults to change between versions. It flags, it never blocks or edits your prose on its own. If you hit a bug or a wrong flag, please [open an issue](https://github.com/ckelsoe/obsidian-plumbline/issues); early reports shape what gets fixed first.
+Flag AI-shaped writing, and check your prose against your own style guide, sources, and character names.
 
 ## What it does
 
