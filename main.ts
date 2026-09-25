@@ -37,6 +37,7 @@ import {
 } from './engine/types';
 import { fileScope } from './engine/file-scope';
 import { lint } from './engine/lint';
+import { toEditorText } from './engine/editor-text';
 import { buildReport } from './report';
 import { scriptureReferences, scriptureQuotes } from './engine/scripture';
 import { summarizeScripture, Citation } from './engine/citation';
@@ -2099,7 +2100,11 @@ export default class PlumblinePlugin extends Plugin {
 			let failed = 0;
 			for (const file of files) {
 				try {
-					const text = await this.app.vault.cachedRead(file);
+					// Editor text, so a CRLF or lone-CR note's offsets and
+					// line numbers match what the editor shows.
+					const text = toEditorText(
+						await this.app.vault.cachedRead(file),
+					);
 					const result = lint(
 						text,
 						this.resolvedConfig(text, file.path),
