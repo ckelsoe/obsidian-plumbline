@@ -1,7 +1,7 @@
 {
 	"name": "plumbline",
 	"version": "0.6.1",
-	"description": "Flag AI-shaped writing and check prose rhythm against your own calibrated baseline.",
+	"description": "Flag AI-shaped writing, and check your prose against your own style guide, sources, and character names.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
@@ -14,7 +14,7 @@
 		"type-coverage": "type-coverage",
 		"test:mutation": "stryker run",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
-		"prepare": "husky"
+		"prepare": "node .husky/install.mjs"
 	},
 	"typeCoverage": {
 		"atLeast": 99
