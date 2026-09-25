@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-25
+
 ### Added
 - Quotes from your own sources: a new reference type, "Quote source (any notes)", points at a folder of notes such as interview transcripts, statutes, or source documents. Cite a quote with a wikilink to its source note, straight after the quote or in a footnote, and Plumbline underlines the quote if it is not in that note. Case, quote marks, line breaks, moved punctuation, and the source note's formatting are ignored; an ellipsis or a bracketed insertion marks a gap. Choosing the folder checks it straight away and reports how many source notes it found.
 
