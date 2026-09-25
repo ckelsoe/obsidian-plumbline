@@ -469,10 +469,12 @@ export default class PlumblinePlugin extends Plugin {
 		// Term lists the note's group uses add their own rules. They come from
 		// references (vault files), not from packs, so they join here rather
 		// than inside the pure resolver.
-		// Source-note folders feed the cited-quote check the same way.
+		// Source-note folders feed the cited-quote check, and name lists the
+		// near-miss name check, the same way.
 		const group = findGroup(profile, this.userGroups) ?? fallbackGroup();
 		const termRules = this.references.termRules(group.id);
 		const sourceNotes = this.references.sourceNoteIndex(group.id);
+		const names = this.references.nameIndex(group.id);
 		return {
 			...config,
 			...(termRules.length > 0
@@ -480,6 +482,7 @@ export default class PlumblinePlugin extends Plugin {
 				: {}),
 			...(sourceNotes ? { sourceNotes } : {}),
 			...(sourceNotes && notePath !== undefined ? { notePath } : {}),
+			...(names ? { names } : {}),
 		};
 	}
 

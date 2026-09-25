@@ -5,6 +5,7 @@ import { fileScope } from './file-scope';
 import { withDiagnosticKeys } from './finding-key';
 import { applyRules } from './apply-rules';
 import { applyHeuristics, heuristicConfidence } from './heuristics';
+import { checkNames, NAME_SLUG } from './name-list';
 import { checkSourceQuotes, SOURCE_QUOTE_SLUG } from './source-quotes';
 import { CONFIDENCE, confidenceFor, rollup } from './rollup';
 import { splitSentencesWithOffsets } from './sentences';
@@ -86,6 +87,11 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 							config.sourceNotes,
 							config.notePath,
 						)
+					: []),
+				// Near-miss names are guesses from spelling, so they keep the
+				// heuristic confidence an unlisted slug gets below.
+				...(config.names && !disabled.has(NAME_SLUG)
+					? checkNames(prose, config.names)
 					: []),
 			];
 	diagnostics.sort((a, b) => a.start - b.start || a.end - b.end);

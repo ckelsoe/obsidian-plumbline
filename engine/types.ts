@@ -1,3 +1,4 @@
+import type { NameIndex } from './name-list';
 import type { SourceNoteIndex } from './source-quotes';
 
 // The engine's public data contract. Kept free of any Obsidian import so the
@@ -179,4 +180,7 @@ export interface ResolvedConfig {
 	// The vault path of the note being checked, so a relative wikilink
 	// ("../Sources/Interview") resolves from the note's own folder.
 	notePath?: string;
+	// Canonical names from the name lists the group uses, for the near-miss
+	// check. Absent when the group uses none.
+	names?: NameIndex;
 }

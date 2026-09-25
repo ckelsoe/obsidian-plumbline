@@ -1,8 +1,8 @@
 import { asStringArray } from './vault-config';
 
 // References are named files or folders in the vault that a reference-driven
-// check reads: Bible text for the quoted-scripture check today, and later a voice
-// file (term list) or a folder of character notes (name list). They are defined
+// check reads: Bible text or other source notes for the quote checks, a voice
+// file (term list), or a folder of character notes (name list). They are defined
 // once and each group picks the ones it uses. See config-model.md, "References:
 // files and folders a group checks against".
 //
@@ -13,17 +13,20 @@ import { asStringArray } from './vault-config';
 export const REFERENCES_PATH = '.plumbline/references.json';
 
 // Only types whose feature has shipped are listed, so the UI never offers a type
-// that does nothing. Name list joins this union when it ships.
+// that does nothing.
 //
 // 'quote-source' is the scripture layout (translation, book and chapter
 // folders); 'source-notes' is any folder of notes, for quotes that cite one
-// note with a wikilink.
-export type ReferenceType = 'quote-source' | 'source-notes' | 'term-list';
+// note with a wikilink. 'name-list' is a folder of notes about people and
+// places, whose titles and aliases are the names to check spelling against.
+export type ReferenceType =
+	'quote-source' | 'source-notes' | 'term-list' | 'name-list';
 
 export const REFERENCE_TYPE_LABELS: Record<ReferenceType, string> = {
 	'quote-source': 'Quote source (scripture layout)',
 	'source-notes': 'Quote source (any notes)',
 	'term-list': 'Term list (voice or style file)',
+	'name-list': 'Name list (people and places)',
 };
 
 // Whether a type points at a folder or at a single note.
