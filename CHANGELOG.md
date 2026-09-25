@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Removed a duplicate `font-size` declaration in `styles.css` flagged by the Obsidian CSS lint.
+
 ## [0.6.2] - 2026-09-25
 
 ### Changed
