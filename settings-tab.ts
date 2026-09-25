@@ -989,6 +989,8 @@ class CheckEditorPage extends SettingPage {
 const TYPE_HELP: Record<ReferenceType, string> = {
 	'quote-source':
 		'Plumbline checks quoted verses against it. Inside the folder: one folder per translation (named by its code, such as KJV), then one folder per book named like "19 - Psalms", holding one note per chapter named like "Psalms 23", with each verse ending in a block ID like ^v1. The README has a full example.',
+	'source-notes':
+		'A folder of notes that quotes cite, such as interview transcripts, statutes, or source documents. Cite a note with a wikilink straight after a quote, like "we shipped late" ([[2024-03-02 Interview]]), or in a footnote. Plumbline flags a quote that is not in the note it cites. The README has a full example.',
 	'term-list':
 		'A note of terms to avoid, flagged in every note the group checks. Use a table with a column such as "Do not use" or "Avoid" and, if you like, one such as "Use instead" for the replacement, or bullets that open with a quoted phrase. A brand voice file in this format works as it is. The README has a full example.',
 };
@@ -1078,7 +1080,11 @@ class ReferenceEditorPage extends SettingPage {
 					isFile ? 'Reference note' : 'Reference folder',
 				);
 				text.setPlaceholder(
-					isFile ? 'Example: Style/Voice.md' : 'Example: Bible',
+					isFile
+						? 'Example: Style/Voice.md'
+						: reference.type === 'source-notes'
+							? 'Example: Interviews'
+							: 'Example: Bible',
 				).setValue(reference.path);
 				const commit = (path: string): void => {
 					void this.commitPath(path);

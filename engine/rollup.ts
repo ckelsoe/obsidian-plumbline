@@ -132,7 +132,9 @@ export function rollup(
 			ruleSlug: slug,
 			packId: first.packId,
 			severity: first.severity,
-			message: first.message,
+			message: hits.every((h) => h.message === first.message)
+				? first.message
+				: (first.findingMessage ?? first.message),
 			occurrences,
 			confidence,
 			priority: priorityOf(first.severity, hits.length, confidence),

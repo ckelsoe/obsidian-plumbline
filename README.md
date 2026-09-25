@@ -33,7 +33,7 @@ Three commands help when a manuscript quotes the Bible. They appear in the comma
 Plumbline does not ship any Bible text. To use "Check quoted scripture":
 
 1. Put the translations you quote in a folder in your vault, in the layout below.
-2. Open **Settings > Plumbline > References**, add a reference, and choose that folder. Plumbline checks the folder straight away and shows what it found, such as "2 translations, 66 books, 1,189 chapters", or what to fix.
+2. Open **Settings > Plumbline > References**, add a reference (its type starts as **Quote source (scripture layout)**, which is the one you want), and choose that folder. Plumbline checks the folder straight away and shows what it found, such as "2 translations, 66 books, 1,189 chapters", or what to fix.
 3. Open **Manage groups**, pick the group you write with, and turn the reference on under **References**. A starter group can use a reference too; you do not need to copy it first.
 
 A group can use several references at once. Until the group has one, the command tells you so rather than guessing. If you rename or move the folder, the reference follows it; if you delete it, the reference shows as Missing.
@@ -106,6 +106,33 @@ Plumbline reads two things from the note and ignores everything else (headings, 
 ### When lists disagree
 
 If two term lists a group uses name the same term, you get one finding that names both lists. If they suggest different replacements, the hover offers each one with the list it came from, and you choose. Plumbline never picks for you. Any term finding can be turned off for a single note from its hover, like any other check.
+
+## Quotes from your own sources
+
+If you quote interviews, transcripts, statutes, or source documents, Plumbline can check that each quote matches the note it came from. Keep the source notes in one folder, cite the note with a wikilink, and a quote that is not in that note is underlined as you write.
+
+1. Put the source notes in a folder, one note per source (an interview, a hearing, a document). Subfolders are fine.
+2. Open **Settings > Plumbline > References**, add a reference, set its type to **Quote source (any notes)**, and choose the folder. Plumbline reads it straight away and shows how many notes it found.
+3. In **Manage groups**, open the group and turn the reference on under **References**.
+
+Cite a quote with a wikilink to its source note, straight after the closing quote mark, or in a footnote whose text opens with the link:
+
+```markdown
+Dana said "we shipped late because QA was short" ([[2024-03-02 Interview]]).
+
+Dana said "we shipped late"[^1].
+
+[^1]: [[2024-03-02 Interview]], 12:30
+
+> We shipped late because QA was short.
+> ([[2024-03-02 Interview]])
+```
+
+- Quotes can use double or single marks, straight or curly. Matching ignores case, the style of quote marks, line breaks, and a comma or full stop moved inside the closing quote mark. Formatting in the source note (bold, italics, links, blockquote marks, block IDs) is ignored too.
+- An ellipsis (`...` or `…`) or a bracketed insertion such as `[the team]` marks a gap. The words either side must each appear in the note, in order.
+- A link to a note outside every source folder the group uses is not checked.
+- If two source folders hold a note with the same name, a quote passes when it is in either one. When it is in neither, the finding names both notes and their references.
+- Turn the check off for one note from the hover, or with `plumbline-disabled-rules: [quote-not-in-source]` in its frontmatter.
 
 ## Installation
 

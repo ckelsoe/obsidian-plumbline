@@ -14,10 +14,15 @@ export const REFERENCES_PATH = '.plumbline/references.json';
 
 // Only types whose feature has shipped are listed, so the UI never offers a type
 // that does nothing. Name list joins this union when it ships.
-export type ReferenceType = 'quote-source' | 'term-list';
+//
+// 'quote-source' is the scripture layout (translation, book and chapter
+// folders); 'source-notes' is any folder of notes, for quotes that cite one
+// note with a wikilink.
+export type ReferenceType = 'quote-source' | 'source-notes' | 'term-list';
 
 export const REFERENCE_TYPE_LABELS: Record<ReferenceType, string> = {
 	'quote-source': 'Quote source (scripture layout)',
+	'source-notes': 'Quote source (any notes)',
 	'term-list': 'Term list (voice or style file)',
 };
 

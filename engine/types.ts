@@ -1,3 +1,5 @@
+import type { SourceNoteIndex } from './source-quotes';
+
 // The engine's public data contract. Kept free of any Obsidian import so the
 // same engine runs in the plugin, the headless CLI, and unit tests. Character
 // offsets are UTF-16 units, matching both CodeMirror positions and JS string
@@ -36,6 +38,11 @@ export interface Diagnostic {
 	// each naming its reference, and the writer picks: nothing is resolved
 	// silently. Present instead of `fix`, never alongside it.
 	fixOptions?: FixOption[];
+	// The message for this rule's finding when its hits in one note carry
+	// different messages (quotes citing different source notes). Each hit keeps
+	// its own message for the hover; the rolled-up row must not repeat the
+	// first hit's source for every other hit.
+	findingMessage?: string;
 }
 
 // One suggested replacement and the reference it came from.
@@ -166,4 +173,10 @@ export interface ResolvedConfig {
 	// defaults on the group and a membership overrides it, the reverse of severity
 	// and confidence (config-model.md).
 	rollupBySlug: Record<string, number>;
+	// Notes in the quote-source folders (any notes) the group uses, for the
+	// cited-quote check. Absent when the group uses none.
+	sourceNotes?: SourceNoteIndex;
+	// The vault path of the note being checked, so a relative wikilink
+	// ("../Sources/Interview") resolves from the note's own folder.
+	notePath?: string;
 }

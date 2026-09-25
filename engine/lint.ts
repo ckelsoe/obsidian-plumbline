@@ -1,12 +1,35 @@
-import { LintResult, Metrics, ResolvedConfig } from './types';
+import { LintResult, Metrics, ResolvedConfig, Span } from './types';
 import { protectedSpans, maskSpans, SKIP_KIND } from './protected-spans';
+import { SCRIPTURE_SPAN_KIND } from './scripture';
 import { fileScope } from './file-scope';
 import { withDiagnosticKeys } from './finding-key';
 import { applyRules } from './apply-rules';
 import { applyHeuristics, heuristicConfidence } from './heuristics';
+import { checkSourceQuotes, SOURCE_QUOTE_SLUG } from './source-quotes';
 import { CONFIDENCE, confidenceFor, rollup } from './rollup';
 import { splitSentencesWithOffsets } from './sentences';
 import { wordCount, mean, coefficientOfVariation } from './sentence-stats';
+
+// The text the cited-quote check reads: code, frontmatter, comments and skipped
+// regions masked like everywhere else, but NOT scripture quotes. The scripture
+// masker keys on a "digit:digit" citation, so a link such as
+// "([[Interview 3:16]])" would otherwise blank the very quote being checked.
+function sourceQuoteText(
+	text: string,
+	config: ResolvedConfig,
+	skipSpans: readonly Span[],
+): string {
+	const spans = [
+		...protectedSpans(text, {
+			...config,
+			protectedSpanKinds: config.protectedSpanKinds.filter(
+				(kind) => kind !== SCRIPTURE_SPAN_KIND,
+			),
+		}),
+		...skipSpans,
+	].sort((a, b) => a.start - b.start || a.end - b.end);
+	return maskSpans(text, spans);
+}
 
 // The engine entry point: text in, diagnostics out. Runs the protected-span
 // pass, masks those spans, computes the rhythm metrics over the remaining prose,
@@ -18,6 +41,11 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 	// JSON report scope identically. A note opted out in one surface and linted
 	// in another would be worse than no scoping at all.
 	const scope = fileScope(text);
+	const skipSpans = scope.skipRanges.map((range) => ({
+		start: range.start,
+		end: range.end,
+		kind: SKIP_KIND,
+	}));
 
 	const spans = protectedSpans(text, config);
 	// Skipped regions join the protected spans rather than filtering diagnostics
@@ -25,9 +53,7 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 	// invisible to every rule AND to the rhythm metrics, which is what "skip this
 	// stretch" has to mean: a burstiness number computed over prose the writer
 	// excluded is a wrong number, not a filtered one.
-	for (const range of scope.skipRanges) {
-		spans.push({ start: range.start, end: range.end, kind: SKIP_KIND });
-	}
+	spans.push(...skipSpans);
 	spans.sort((a, b) => a.start - b.start || a.end - b.end);
 	const prose = maskSpans(text, spans);
 	const sentences = splitSentencesWithOffsets(prose);
@@ -52,6 +78,15 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 					disabled,
 					config.severityBySlug,
 				),
+				// Cited quotes are read from the masked prose, so a quote inside
+				// code or a skipped region is never checked.
+				...(config.sourceNotes && !disabled.has(SOURCE_QUOTE_SLUG)
+					? checkSourceQuotes(
+							sourceQuoteText(text, config, skipSpans),
+							config.sourceNotes,
+							config.notePath,
+						)
+					: []),
 			];
 	diagnostics.sort((a, b) => a.start - b.start || a.end - b.end);
 	// Keyed once, here, so the hover, the panel, the report and a promoted
@@ -64,6 +99,16 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 	const mechanical = new Map(config.rules.map((r) => [r.slug, r]));
 	const confidenceOf = (slug: string): number => {
 		const rule = mechanical.get(slug);
+		// A cited quote is compared word for word with its source, so it is as
+		// certain as a phrase rule, though it is not one.
+		if (slug === SOURCE_QUOTE_SLUG) {
+			return confidenceFor(
+				slug,
+				undefined,
+				CONFIDENCE.mechanical,
+				config.confidenceBySlug,
+			);
+		}
 		if (rule !== undefined) {
 			return confidenceFor(
 				slug,

@@ -20,7 +20,7 @@ export class AnalysisService {
 		// One read of the text, used for both: the note's own profile decides
 		// which packs resolve, so config and lint must see the same document.
 		const text = view.editor.getValue();
-		return lint(text, this.plugin.resolvedConfig(text));
+		return lint(text, this.plugin.resolvedConfig(text, view.file?.path));
 	}
 
 	// Convenience for callers that only need the active note (the rhythm command).
