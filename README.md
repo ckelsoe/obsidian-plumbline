@@ -134,6 +134,28 @@ Dana said "we shipped late"[^1].
 - If two source folders hold a note with the same name, a quote passes when it is in either one. When it is in neither, the finding names both notes and their references.
 - Turn the check off for one note from the hover, or with `plumbline-disabled-rules: [quote-not-in-source]` in its frontmatter.
 
+## Names in fiction: name lists
+
+A name list is a folder of notes about the people and places in your story, one note each, titled with the name. Point Plumbline at it and a name spelled a letter off, such as "Katherine" for "Catherine" or "Jonahtan" for "Jonathan", is underlined, with the right name one click away.
+
+1. Keep a note per character or place, titled with the name. Put other spellings you use on purpose in the note's `aliases` frontmatter, and they count as names too.
+2. Open **Settings > Plumbline > References**, add a reference, set its type to **Name list (people and places)**, and choose the folder. Plumbline reads it straight away and shows how many names and aliases it found.
+3. In **Manage groups**, open the group and turn the name list on under **References**.
+
+```markdown
+---
+aliases: [Kate, Cat]
+---
+# Catherine
+```
+
+- A capitalised word is flagged when it is one letter off a name: a letter changed, added, dropped, or two letters swapped. Names of eight or more letters allow two.
+- Names and words under four letters are never checked, and neither are words in capitals throughout, such as headings and acronyms.
+- A name or alias exactly as listed is never flagged, whatever its case or apostrophe style ("O'Brien" and "O’Brien" are the same name), and neither is a family named in the plural ("the Bennets").
+- A name of several words ("Mary Jane") is matched against capitalised words separated by single spaces.
+- If a word is close to two names, the hover offers both, each with the list it came from, and you choose. A name in two lists is one suggestion naming both.
+- A short name can sit one letter from an ordinary word ("Mary" and "Many"). Turn the check off for a note from the hover, or with `plumbline-disabled-rules: [name-near-miss]` in its frontmatter.
+
 ## Installation
 
 Plumbline is **not yet in the Obsidian community store**. While it is in early release, install it one of these two ways. Both need a published release, so if the steps below find nothing, a release has not been cut yet.

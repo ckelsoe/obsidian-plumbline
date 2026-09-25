@@ -991,6 +991,8 @@ const TYPE_HELP: Record<ReferenceType, string> = {
 		'Plumbline checks quoted verses against it. Inside the folder: one folder per translation (named by its code, such as KJV), then one folder per book named like "19 - Psalms", holding one note per chapter named like "Psalms 23", with each verse ending in a block ID like ^v1. The README has a full example.',
 	'source-notes':
 		'A folder of notes that quotes cite, such as interview transcripts, statutes, or source documents. Cite a note with a wikilink straight after a quote, like "we shipped late" ([[2024-03-02 Interview]]), or in a footnote. Plumbline flags a quote that is not in the note it cites. The README has a full example.',
+	'name-list':
+		'A folder of notes about the people and places in your story, one note each, titled with the name. Aliases in a note\'s frontmatter count as names too. Plumbline flags a capitalised word that is one letter off a name (two for names of eight or more letters), such as "Katherine" for "Catherine", and offers the name. Names under four letters are not checked. The README has a full example.',
 	'term-list':
 		'A note of terms to avoid, flagged in every note the group checks. Use a table with a column such as "Do not use" or "Avoid" and, if you like, one such as "Use instead" for the replacement, or bullets that open with a quoted phrase. A brand voice file in this format works as it is. The README has a full example.',
 };
@@ -1084,7 +1086,9 @@ class ReferenceEditorPage extends SettingPage {
 						? 'Example: Style/Voice.md'
 						: reference.type === 'source-notes'
 							? 'Example: Interviews'
-							: 'Example: Bible',
+							: reference.type === 'name-list'
+								? 'Example: Characters'
+								: 'Example: Bible',
 				).setValue(reference.path);
 				const commit = (path: string): void => {
 					void this.commitPath(path);

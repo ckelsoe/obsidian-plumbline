@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Name lists for fiction: a new reference type, "Name list (people and places)", points at a folder of notes about your characters and places. Each note's title and its frontmatter aliases are names, and a capitalised word one letter off a name ("Katherine" for "Catherine") is underlined, with the name offered as a one-click fix. Names of eight or more letters allow two letters off. Short names, words in capitals, exact names, and plural family names are never flagged. A word close to two names offers both, each labelled with its list.
+
 ## [0.5.0] - 2026-09-25
 
 ### Added

@@ -1,11 +1,18 @@
 import {
+	getFrontMatterInfo,
 	normalizePath,
 	Notice,
 	TAbstractFile,
 	TFile,
 	TFolder,
 	Vault,
+	parseYaml,
 } from 'obsidian';
+import {
+	buildNameIndex,
+	describeNameList,
+	NameIndex,
+} from './engine/name-list';
 import {
 	checkQuoteSourceLayout,
 	LayoutTranslation,
@@ -30,6 +37,7 @@ import {
 	SourceNoteIndex,
 } from './engine/source-quotes';
 import { parseChapter } from './engine/verbatim';
+import { asStringArray } from './engine/vault-config';
 import {
 	buildTermRules,
 	describeTermList,
@@ -71,12 +79,36 @@ interface CheckResult {
 	status: ReferenceStatus;
 	entries?: TermEntry[];
 	notes?: ReadSourceNote[];
+	names?: string[];
 }
 
 function childFolders(folder: TFolder): TFolder[] {
 	return folder.children.filter(
 		(child): child is TFolder => child instanceof TFolder,
 	);
+}
+
+// A note's frontmatter aliases ("aliases" or the older "alias"), as a list or a
+// single string. Anything else in the frontmatter, or YAML that does not
+// parse, gives none.
+function aliasesOf(content: string): string[] {
+	const info = getFrontMatterInfo(content);
+	if (!info.exists) {
+		return [];
+	}
+	let parsed: unknown;
+	try {
+		parsed = parseYaml(info.frontmatter) as unknown;
+	} catch {
+		return [];
+	}
+	if (typeof parsed !== 'object' || parsed === null) {
+		return [];
+	}
+	const obj = parsed as Record<string, unknown>;
+	const raw = obj.aliases ?? obj.alias;
+	const list = typeof raw === 'string' ? [raw] : asStringArray(raw);
+	return list.map((a) => a.trim()).filter((a) => a.length > 0);
 }
 
 // Plugin-side owner of the references store: persistence, validation, vault
@@ -95,6 +127,10 @@ export class ReferenceService {
 	// and dropped like the terms and the rule cache.
 	private readonly sourceNotes = new Map<string, ReadSourceNote[]>();
 	private readonly sourceIndexCache = new Map<string, SourceNoteIndex>();
+	// Names (titles and aliases) per name-list reference, and the merged index
+	// per group.
+	private readonly names = new Map<string, string[]>();
+	private readonly nameIndexCache = new Map<string, NameIndex>();
 	private saveQueue: Promise<void> = Promise.resolve();
 	private readonly pending = new Set<string>();
 	private timer: number | null = null;
@@ -106,6 +142,7 @@ export class ReferenceService {
 	private dropCaches(): void {
 		this.ruleCache.clear();
 		this.sourceIndexCache.clear();
+		this.nameIndexCache.clear();
 	}
 
 	list(): Reference[] {
@@ -206,21 +243,26 @@ export class ReferenceService {
 		if (reference.type === 'source-notes') {
 			return this.checkSourceNotes(reference);
 		}
+		if (reference.type === 'name-list') {
+			return this.checkNameList(reference);
+		}
 		return { status: await this.checkQuoteSource(reference) };
 	}
 
-	// A source-notes folder is valid when it holds at least one note. Every note
-	// in it (subfolders included) is read in this pass and kept, so a cited
-	// quote is checked without reading a file while the writer types.
-	private async checkSourceNotes(reference: Reference): Promise<CheckResult> {
+	// Every Markdown note in a reference's folder, subfolders included, or a
+	// status saying why there is none to read.
+	private folderNotes(
+		reference: Reference,
+	): { files: TFile[] } | { status: ReferenceStatus } {
 		const path = reference.path.trim();
 		if (path.length === 0) {
 			return {
 				status: { state: 'invalid', message: 'Choose a folder.' },
 			};
 		}
-		const vault = this.plugin.app.vault;
-		const folder = vault.getFolderByPath(normalizePath(path));
+		const folder = this.plugin.app.vault.getFolderByPath(
+			normalizePath(path),
+		);
 		if (!folder) {
 			return {
 				status: {
@@ -235,6 +277,58 @@ export class ReferenceService {
 				files.push(child);
 			}
 		});
+		return { files };
+	}
+
+	// A name list is valid when its folder holds at least one note. Each note's
+	// title is a name, and so is each of its frontmatter aliases. A note that
+	// cannot be read still gives its title.
+	private async checkNameList(reference: Reference): Promise<CheckResult> {
+		const found = this.folderNotes(reference);
+		if ('status' in found) {
+			return { status: found.status };
+		}
+		if (found.files.length === 0) {
+			return {
+				status: {
+					state: 'invalid',
+					message:
+						'No notes in this folder. Add one note per person or place, titled with the name.',
+				},
+			};
+		}
+		const vault = this.plugin.app.vault;
+		const aliasLists = await Promise.all(
+			found.files.map(async (file) => {
+				try {
+					return aliasesOf(await vault.cachedRead(file));
+				} catch (err) {
+					console.error(err);
+					return [];
+				}
+			}),
+		);
+		const aliases = aliasLists.flat();
+		const names = [...found.files.map((f) => f.basename), ...aliases];
+		return {
+			status: {
+				state: 'ok',
+				message: describeNameList(found.files.length, aliases.length),
+			},
+			names,
+		};
+	}
+
+	// A source-notes folder is valid when it holds at least one note. Every note
+	// in it (subfolders included) is read in this pass and kept, so a cited
+	// quote is checked without reading a file while the writer types.
+	private async checkSourceNotes(reference: Reference): Promise<CheckResult> {
+		const found = this.folderNotes(reference);
+		if ('status' in found) {
+			return { status: found.status };
+		}
+		const vault = this.plugin.app.vault;
+		const files = found.files;
 		if (files.length === 0) {
 			return {
 				status: {
@@ -377,7 +471,7 @@ export class ReferenceService {
 				},
 			};
 		}
-		const { status, entries, notes } = result;
+		const { status, entries, notes, names } = result;
 		if (
 			this.get(reference.id) !== reference ||
 			reference.path !== path ||
@@ -395,6 +489,11 @@ export class ReferenceService {
 			this.sourceNotes.set(reference.id, notes);
 		} else {
 			this.sourceNotes.delete(reference.id);
+		}
+		if (names !== undefined) {
+			this.names.set(reference.id, names);
+		} else {
+			this.names.delete(reference.id);
 		}
 		this.dropCaches();
 	}
@@ -465,6 +564,7 @@ export class ReferenceService {
 		this.statuses.delete(id);
 		this.terms.delete(id);
 		this.sourceNotes.delete(id);
+		this.names.delete(id);
 		await this.save();
 		this.plugin.applyConfigChange();
 	}
@@ -618,6 +718,25 @@ export class ReferenceService {
 		const index = buildSourceNoteIndex(folders);
 		this.sourceIndexCache.set(groupId, index);
 		return index.size > 0 ? index : undefined;
+	}
+
+	// The canonical names a group's prose is checked against: every valid name
+	// list it uses, merged so a name in two lists names both. Undefined when the
+	// group uses none, so lint skips the check.
+	nameIndex(groupId: string): NameIndex | undefined {
+		let index = this.nameIndexCache.get(groupId);
+		if (!index) {
+			index = buildNameIndex(
+				this.forGroup(groupId)
+					.filter((r) => r.type === 'name-list')
+					.map((r) => ({
+						reference: r.name,
+						names: this.names.get(r.id) ?? [],
+					})),
+			);
+			this.nameIndexCache.set(groupId, index);
+		}
+		return index.maxWords > 0 ? index : undefined;
 	}
 
 	// Every quote-source folder in the vault (scripture layout or any notes),
