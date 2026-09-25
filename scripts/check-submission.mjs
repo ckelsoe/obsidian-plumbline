@@ -145,6 +145,33 @@ try {
 			findings.push(`styles.css:${index + 1}: avoid !important; raise selector specificity instead.`);
 		}
 	});
+
+	// The hosted scan's CSS lint flags a property declared twice in one block.
+	// Each "{" opens a fresh block (nested @media included), so a property is
+	// only a duplicate within the same innermost block.
+	// Text that ends at "{" is a selector or at-rule prelude, never a declaration.
+	const blocks = [];
+	const segment = /([^{};]*)([{};])/g;
+	let token;
+	while ((token = segment.exec(withoutComments)) !== null) {
+		const [, text, terminator] = token;
+		if (terminator === "{") {
+			blocks.push(new Set());
+			continue;
+		}
+		const current = blocks[blocks.length - 1];
+		const match = /^\s*(-{0,2}[a-zA-Z][\w-]*)\s*:/.exec(text);
+		if (current && match) {
+			const property = match[1].toLowerCase();
+			if (current.has(property)) {
+				const offset = token.index + text.search(/\S/);
+				const line = withoutComments.slice(0, offset).split("\n").length;
+				findings.push(`styles.css:${line}: duplicate "${property}" in the same rule.`);
+			}
+			current.add(property);
+		}
+		if (terminator === "}") blocks.pop();
+	}
 } catch {
 	// styles.css is optional; skip if absent.
 }
