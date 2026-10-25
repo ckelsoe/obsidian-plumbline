@@ -118,15 +118,17 @@ const ABSTRACT_SUFFIXES = ['ion', 'ment', 'ness', 'ity', 'ance', 'ence'];
 // copies sit at one line's end and the next line's start. Words are matched one
 // at a time and each neighbouring pair compared, rather than with a
 // backreference pattern, which backtracks super-linearly.
-// A contraction is one word with either apostrophe, so "can can’t" is not
-// read as a doubled "can".
-const WORD = /[a-z]+(?:['’][a-z]+)*/gi;
+// A word is a run of Unicode letters, so "café café" is caught whole. A
+// contraction is one word with either apostrophe, so "can can’t" is not read as
+// a doubled "can".
+const WORD = /\p{L}+(?:['’]\p{L}+)*/gu;
 
 // The gap between two copies: plain whitespace with at most one line break, so
 // a doubled word across a paragraph break is not flagged. Checked by hand rather
 // than with a pattern of optional whitespace runs, which backtracks.
 function isDoubledGap(gap: string): boolean {
-	return /^[ \t\r\n]+$/.test(gap) && gap.split('\n').length <= 2;
+	// CRLF, LF, and a lone CR (old Mac files) each count as one line break.
+	return /^[ \t\r\n]+$/.test(gap) && gap.split(/\r\n|\r|\n/).length <= 2;
 }
 
 // True when [start, end) touches a protected span. Protected text reaches the
@@ -166,9 +168,14 @@ const LEGITIMATE_DOUBLES = new Set([
 // copy capitalized and is still flagged. One letter is never a name, so "I I"
 // is flagged too.
 function isNameWord(word: string): boolean {
-	const first = word[0];
+	// By code point, so a letter outside the Basic Multilingual Plane is one
+	// letter, not two halves that are neither upper- nor lower-case.
+	const letters = Array.from(word);
+	const first = letters[0] ?? '';
 	return (
-		word.length > 1 && first !== undefined && first >= 'A' && first <= 'Z'
+		letters.length > 1 &&
+		first !== first.toLowerCase() &&
+		first === first.toUpperCase()
 	);
 }
 
@@ -246,7 +253,7 @@ export const HEURISTIC_RULES: HeuristicRule[] = [
 		confidence: CONFIDENCE.mechanical,
 		run: (text, _sentences, _paragraphs, protectedRanges) => {
 			const ranges: Range[] = [];
-			const matcher = new RegExp(WORD.source, 'gi');
+			const matcher = new RegExp(WORD.source, 'gu');
 			let prev: { word: string; start: number; end: number } | null =
 				null;
 			for (
@@ -256,9 +263,8 @@ export const HEURISTIC_RULES: HeuristicRule[] = [
 			) {
 				const start = m.index;
 				const end = matcher.lastIndex;
-				// Whole words only, judged on Unicode letters: a run of ASCII
-				// letters glued to an accented one ("voil" in "voilà") is part of
-				// a longer word and breaks the chain.
+				// Whole words only: letters glued to a digit or underscore
+				// ("the2") are part of a longer token and break the chain.
 				if (!atWordEdges(text, start, end)) {
 					prev = null;
 					continue;

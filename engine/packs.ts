@@ -151,7 +151,8 @@ export const BASE_RULES: Rule[] = [
 			// this time" ("at this time last year" would become "now last year"),
 			// "outside of" ("the outside of the house"), "in between" ("somewhere
 			// in between"), "along the lines of" ("draw along the lines of the
-			// template"), "whether or not", "cease" ("stop to exist"), "terminate",
+			// template"), "by means of" ("by a key" for "with a key"), "for the
+			// purpose of" ("met for discussing"), "whether or not", "cease" ("stop to exist"), "terminate",
 			// "endeavor".
 			'adjacent to',
 			'already existing',
@@ -159,7 +160,6 @@ export const BASE_RULES: Rule[] = [
 			'as per',
 			'at the present time',
 			'because of the fact that',
-			'by means of',
 			'by virtue of the fact that',
 			'commence',
 			'commences',
@@ -168,7 +168,6 @@ export const BASE_RULES: Rule[] = [
 			'each and every',
 			'first and foremost',
 			'for the duration of',
-			'for the purpose of',
 			'have a tendency to',
 			'has a tendency to',
 			'had a tendency to',
@@ -214,7 +213,6 @@ export const BASE_RULES: Rule[] = [
 			'as per': 'per',
 			'at the present time': 'now',
 			'because of the fact that': 'because',
-			'by means of': 'by',
 			'by virtue of the fact that': 'because',
 			commence: 'begin',
 			commences: 'begins',
@@ -222,8 +220,7 @@ export const BASE_RULES: Rule[] = [
 			'during the course of': 'during',
 			'each and every': 'every',
 			'first and foremost': 'first',
-			'for the duration of': 'during',
-			'for the purpose of': 'for',
+			'for the duration of': 'throughout',
 			'have a tendency to': 'tend to',
 			'has a tendency to': 'tends to',
 			'had a tendency to': 'tended to',

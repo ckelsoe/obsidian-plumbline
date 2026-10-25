@@ -205,13 +205,24 @@ describe('wordy-substitute', () => {
 
 	// Left out on purpose: each has a context where the swap breaks the
 	// sentence ("has commenced" would become "has began").
+	const diagnosticsFor = (text: string) =>
+		applyRules(text, BASE_RULES).filter(
+			(d) => d.ruleSlug === 'wordy-substitute',
+		);
+
 	it('does not flag the forms with no single right replacement', () => {
-		expect(fixFor('The work has commenced.')).toBeUndefined();
-		expect(fixFor('At this time last year.')).toBeUndefined();
-		expect(fixFor('Decide whether or not to go.')).toBeUndefined();
-		expect(fixFor('Paint the outside of the house.')).toBeUndefined();
-		expect(fixFor('Put it somewhere in between.')).toBeUndefined();
-		expect(fixFor('Draw along the lines of the template.')).toBeUndefined();
+		expect(diagnosticsFor('The work has commenced.')).toEqual([]);
+		expect(diagnosticsFor('They opened it by means of a key.')).toEqual([]);
+		expect(
+			diagnosticsFor('They met for the purpose of discussing it.'),
+		).toEqual([]);
+		expect(diagnosticsFor('At this time last year.')).toEqual([]);
+		expect(diagnosticsFor('Decide whether or not to go.')).toEqual([]);
+		expect(diagnosticsFor('Paint the outside of the house.')).toEqual([]);
+		expect(diagnosticsFor('Put it somewhere in between.')).toEqual([]);
+		expect(diagnosticsFor('Draw along the lines of the template.')).toEqual(
+			[],
+		);
 	});
 
 	it('matches inflected forms', () => {

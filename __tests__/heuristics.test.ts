@@ -216,6 +216,33 @@ describe('repeated-word', () => {
 		]);
 	});
 
+	it('catches a doubled accented word whole', () => {
+		expect(hits('Meet at the café café on Main.')).toEqual([
+			{ text: 'café café', fix: 'café' },
+		]);
+	});
+
+	it('does not flag a doubled accented name', () => {
+		expect(hits('They flew to Éire Éire.')).toEqual([]);
+	});
+
+	// Deseret letters are two UTF-16 units each; the edge and capital checks
+	// must read whole characters.
+	it('reads letters outside the Basic Multilingual Plane whole', () => {
+		expect(hits('\u{10428} \u{10428}2')).toEqual([]);
+		expect(hits('\u{10400}\u{10428} \u{10400}\u{10428}')).toEqual([]);
+		expect(hits('a \u{10428}\u{10429} \u{10428}\u{10429} b')).toEqual([
+			{
+				text: '\u{10428}\u{10429} \u{10428}\u{10429}',
+				fix: '\u{10428}\u{10429}',
+			},
+		]);
+	});
+
+	it('does not flag across a paragraph break in an old Mac file', () => {
+		expect(hits('It ended with the\r\rthe next one.')).toEqual([]);
+	});
+
 	it('reads a contraction as one word, with either apostrophe', () => {
 		expect(hits("The can can't be opened.")).toEqual([]);
 		expect(hits('The can can’t be opened.')).toEqual([]);
