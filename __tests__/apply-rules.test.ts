@@ -192,6 +192,39 @@ describe('wordy-substitute', () => {
 		expect(fixFor('At this point in time we stop.')).toBe('Now');
 	});
 
+	// Picked from the too-wordy list; one per shape of entry.
+	it('offers the replacements picked from too-wordy', () => {
+		expect(fixFor('Each and every draft.')).toBe('Every');
+		expect(fixFor('The room adjacent to the hall.')).toBe('next to');
+		expect(fixFor('Use tea in lieu of coffee.')).toBe('instead of');
+		expect(fixFor('Wait until such time as it dries.')).toBe('until');
+		expect(fixFor('It has a tendency to drift.')).toBe('tends to');
+		expect(fixFor('Irregardless of cost.')).toBe('Regardless');
+		expect(fixFor('Jump off of the wall.')).toBe('off');
+	});
+
+	// Left out on purpose: each has a context where the swap breaks the
+	// sentence ("has commenced" would become "has began").
+	const diagnosticsFor = (text: string) =>
+		applyRules(text, BASE_RULES).filter(
+			(d) => d.ruleSlug === 'wordy-substitute',
+		);
+
+	it('does not flag the forms with no single right replacement', () => {
+		expect(diagnosticsFor('The work has commenced.')).toEqual([]);
+		expect(diagnosticsFor('They opened it by means of a key.')).toEqual([]);
+		expect(
+			diagnosticsFor('They met for the purpose of discussing it.'),
+		).toEqual([]);
+		expect(diagnosticsFor('At this time last year.')).toEqual([]);
+		expect(diagnosticsFor('Decide whether or not to go.')).toEqual([]);
+		expect(diagnosticsFor('Paint the outside of the house.')).toEqual([]);
+		expect(diagnosticsFor('Put it somewhere in between.')).toEqual([]);
+		expect(diagnosticsFor('Draw along the lines of the template.')).toEqual(
+			[],
+		);
+	});
+
 	it('matches inflected forms', () => {
 		expect(fixFor('She utilized it.')).toBe('used');
 		expect(fixFor('They are utilizing it.')).toBe('using');

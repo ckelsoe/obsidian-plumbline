@@ -262,3 +262,23 @@ describe('lint per-membership tuning', () => {
 		expect(readerFinding(2)?.rolledUp).toBe(true);
 	});
 });
+
+describe('repeated-word through lint()', () => {
+	const repeated = (text: string) =>
+		lint(text, config).diagnostics.filter(
+			(d) => d.ruleSlug === 'repeated-word',
+		);
+
+	it('carries the fix through to the diagnostic', () => {
+		const [hit] = repeated('We went to the the store.');
+		expect(hit?.fix).toBe('the');
+	});
+
+	// Inline code is masked to spaces, so these copies are not neighbours.
+	it('does not pair words either side of inline code', () => {
+		expect(repeated('Set the `x` the value.')).toEqual([]);
+		// Masked to "the\n   the", which looks like list indentation. A fix
+		// here would delete the code.
+		expect(repeated('Set the\n`x`the value.')).toEqual([]);
+	});
+});

@@ -60,15 +60,36 @@ function isWordChar(char: string | undefined): boolean {
 	return char !== undefined && char.length > 0 && WORD_CHAR.test(char);
 }
 
+// The whole character starting at `index`, or ending just before it. A letter
+// outside the Basic Multilingual Plane (Deseret, many CJK extensions) is two
+// UTF-16 units, and either unit alone tests as no letter at all.
+function charStartingAt(text: string, index: number): string {
+	const code = text.codePointAt(index);
+	return code === undefined ? '' : String.fromCodePoint(code);
+}
+
+function charEndingAt(text: string, index: number): string {
+	const low = text.charCodeAt(index - 1);
+	const high = text.charCodeAt(index - 2);
+	if (low >= 0xdc00 && low <= 0xdfff && high >= 0xd800 && high <= 0xdbff) {
+		return text.slice(index - 2, index);
+	}
+	return text.charAt(index - 1);
+}
+
 // A match is a whole word or phrase only if a word character at either edge
 // is not glued to another word character outside it.
-function atWordEdges(prose: string, start: number, end: number): boolean {
-	const first = prose.charAt(start);
-	const last = prose.charAt(end - 1);
-	if (isWordChar(first) && isWordChar(prose.charAt(start - 1))) {
+export function atWordEdges(
+	prose: string,
+	start: number,
+	end: number,
+): boolean {
+	const first = charStartingAt(prose, start);
+	const last = charEndingAt(prose, end);
+	if (isWordChar(first) && isWordChar(charEndingAt(prose, start))) {
 		return false;
 	}
-	return !(isWordChar(last) && isWordChar(prose.charAt(end)));
+	return !(isWordChar(last) && isWordChar(charStartingAt(prose, end)));
 }
 
 // Which fix options apply to a match. Looked up by the matched text first. A
