@@ -78,6 +78,7 @@ export function lint(text: string, config: ResolvedConfig): LintResult {
 					sentences,
 					disabled,
 					config.severityBySlug,
+					spans,
 				),
 				// Cited quotes are read from the masked prose, so a quote inside
 				// code or a skipped region is never checked.

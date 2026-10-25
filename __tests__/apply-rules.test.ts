@@ -192,6 +192,28 @@ describe('wordy-substitute', () => {
 		expect(fixFor('At this point in time we stop.')).toBe('Now');
 	});
 
+	// Picked from the too-wordy list; one per shape of entry.
+	it('offers the replacements picked from too-wordy', () => {
+		expect(fixFor('Each and every draft.')).toBe('Every');
+		expect(fixFor('The room adjacent to the hall.')).toBe('next to');
+		expect(fixFor('Use tea in lieu of coffee.')).toBe('instead of');
+		expect(fixFor('Wait until such time as it dries.')).toBe('until');
+		expect(fixFor('It has a tendency to drift.')).toBe('tends to');
+		expect(fixFor('Irregardless of cost.')).toBe('Regardless');
+		expect(fixFor('Jump off of the wall.')).toBe('off');
+	});
+
+	// Left out on purpose: each has a context where the swap breaks the
+	// sentence ("has commenced" would become "has began").
+	it('does not flag the forms with no single right replacement', () => {
+		expect(fixFor('The work has commenced.')).toBeUndefined();
+		expect(fixFor('At this time last year.')).toBeUndefined();
+		expect(fixFor('Decide whether or not to go.')).toBeUndefined();
+		expect(fixFor('Paint the outside of the house.')).toBeUndefined();
+		expect(fixFor('Put it somewhere in between.')).toBeUndefined();
+		expect(fixFor('Draw along the lines of the template.')).toBeUndefined();
+	});
+
 	it('matches inflected forms', () => {
 		expect(fixFor('She utilized it.')).toBe('used');
 		expect(fixFor('They are utilizing it.')).toBe('using');

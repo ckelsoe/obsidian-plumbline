@@ -62,7 +62,11 @@ function isWordChar(char: string | undefined): boolean {
 
 // A match is a whole word or phrase only if a word character at either edge
 // is not glued to another word character outside it.
-function atWordEdges(prose: string, start: number, end: number): boolean {
+export function atWordEdges(
+	prose: string,
+	start: number,
+	end: number,
+): boolean {
 	const first = prose.charAt(start);
 	const last = prose.charAt(end - 1);
 	if (isWordChar(first) && isWordChar(prose.charAt(start - 1))) {

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- A **repeated-word** check flags a word typed twice in a row ("the the"), including when the two copies sit at the end of one line and the start of the next, which is where the eye skips over them. The hover offers a one-click fix that keeps the first copy. Words that are correctly doubled ("had had", "that that", "do do") and place names ("Walla Walla") are left alone. It is part of the base checks, so every group runs it; turn it off per group or per note like any other check.
+- The **wordy-substitute** check knows 38 more wordy phrases, each with a one-click replacement, such as "each and every" (every), "in lieu of" (instead of), "until such time as" (until), and "irregardless" (regardless). They were picked from the open-source too-wordy list, keeping only the phrases whose replacement is right in any sentence.
+
 ## [0.6.3] - 2026-09-25
 
 ### Fixed

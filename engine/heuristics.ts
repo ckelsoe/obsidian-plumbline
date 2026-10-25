@@ -1,5 +1,6 @@
 import { Diagnostic, Severity } from './types';
 import { CONFIDENCE } from './rollup';
+import { atWordEdges } from './apply-rules';
 import {
 	SentenceSpan,
 	ParagraphSpan,
@@ -9,6 +10,10 @@ import {
 interface Range {
 	start: number;
 	end: number;
+	// The replacement for the whole range, when there is exactly one right
+	// answer (a doubled word collapses to its first copy). Absent for every
+	// heuristic that flags a judgment call.
+	fix?: string;
 }
 
 interface HeuristicRule {
@@ -24,6 +29,7 @@ interface HeuristicRule {
 		text: string,
 		sentences: SentenceSpan[],
 		paragraphs: ParagraphSpan[],
+		protectedRanges: readonly Range[],
 	): Range[];
 }
 
@@ -108,6 +114,64 @@ const MONTHS = new Set([
 ]);
 const ABSTRACT_SUFFIXES = ['ion', 'ment', 'ness', 'ity', 'ance', 'ence'];
 
+// A word typed twice in a row ("the the"), the slip the eye skips when the
+// copies sit at one line's end and the next line's start. Words are matched one
+// at a time and each neighbouring pair compared, rather than with a
+// backreference pattern, which backtracks super-linearly.
+// A contraction is one word with either apostrophe, so "can can’t" is not
+// read as a doubled "can".
+const WORD = /[a-z]+(?:['’][a-z]+)*/gi;
+
+// The gap between two copies: plain whitespace with at most one line break, so
+// a doubled word across a paragraph break is not flagged. Checked by hand rather
+// than with a pattern of optional whitespace runs, which backtracks.
+function isDoubledGap(gap: string): boolean {
+	return /^[ \t\r\n]+$/.test(gap) && gap.split('\n').length <= 2;
+}
+
+// True when [start, end) touches a protected span. Protected text reaches the
+// heuristics masked to spaces, so "the `x` the" looks like "the", spaces, "the";
+// only the spans themselves can tell that gap from typed whitespace, and a fix
+// over it would delete the protected text.
+function touchesProtected(
+	start: number,
+	end: number,
+	protectedRanges: readonly Range[],
+): boolean {
+	return protectedRanges.some((r) => r.start < end && r.end > start);
+}
+
+// Words correctly doubled in ordinary English ("he had had enough", "she said
+// that that was fine", "what it is is plain") or reduplicated on purpose
+// ("there, there" without the comma, "no no", "knock knock").
+const LEGITIMATE_DOUBLES = new Set([
+	'had',
+	'that',
+	'do',
+	'is',
+	'there',
+	'now',
+	'no',
+	'so',
+	'bye',
+	'knock',
+	'tut',
+	'ha',
+	'blah',
+	'yeah',
+]);
+
+// Both copies capitalized is the shape of a place name ("Walla Walla", "Bora
+// Bora"). A doubled article at a sentence start ("The the") has only the first
+// copy capitalized and is still flagged. One letter is never a name, so "I I"
+// is flagged too.
+function isNameWord(word: string): boolean {
+	const first = word[0];
+	return (
+		word.length > 1 && first !== undefined && first >= 'A' && first <= 'Z'
+	);
+}
+
 function words(text: string): string[] {
 	return text
 		.trim()
@@ -173,6 +237,52 @@ function isAbstractNoun(word: string): boolean {
 }
 
 export const HEURISTIC_RULES: HeuristicRule[] = [
+	{
+		slug: 'repeated-word',
+		packId: HEURISTIC_PACK_ID,
+		severity: 'warning',
+		message: 'Repeated word. Delete the second copy.',
+		// A pattern, not a reading: the word is doubled or it is not.
+		confidence: CONFIDENCE.mechanical,
+		run: (text, _sentences, _paragraphs, protectedRanges) => {
+			const ranges: Range[] = [];
+			const matcher = new RegExp(WORD.source, 'gi');
+			let prev: { word: string; start: number; end: number } | null =
+				null;
+			for (
+				let m = matcher.exec(text);
+				m !== null;
+				m = matcher.exec(text)
+			) {
+				const start = m.index;
+				const end = matcher.lastIndex;
+				// Whole words only, judged on Unicode letters: a run of ASCII
+				// letters glued to an accented one ("voil" in "voilà") is part of
+				// a longer word and breaks the chain.
+				if (!atWordEdges(text, start, end)) {
+					prev = null;
+					continue;
+				}
+				const word = m[0];
+				if (
+					prev !== null &&
+					prev.word.toLowerCase() === word.toLowerCase() &&
+					isDoubledGap(text.slice(prev.end, start)) &&
+					!touchesProtected(prev.end, start, protectedRanges) &&
+					!LEGITIMATE_DOUBLES.has(word.toLowerCase()) &&
+					!(isNameWord(prev.word) && isNameWord(word))
+				) {
+					ranges.push({ start: prev.start, end, fix: prev.word });
+					// A tripled word gives one finding, not two overlapping ones
+					// whose fixes would fight; the fix leaves a pair, flagged next.
+					prev = null;
+					continue;
+				}
+				prev = { word, start, end };
+			}
+			return ranges;
+		},
+	},
 	{
 		slug: 'negation-assertion',
 		packId: HEURISTIC_PACK_ID,
@@ -378,11 +488,14 @@ export function heuristicConfidence(slug: string): number | undefined {
 // A slug in `severityBySlug` fires at the overridden severity instead of the
 // record's default: a mechanical rule carries its group-tuned severity on a copied
 // record, but a heuristic is resolved here, so its override is applied at this point.
+// `protectedRanges` are the masked spans, for a heuristic that must not reach
+// across one (repeated-word).
 export function applyHeuristics(
 	text: string,
 	sentences: SentenceSpan[],
 	disabled: Set<string> = new Set(),
 	severityBySlug: Record<string, Severity> = {},
+	protectedRanges: readonly Range[] = [],
 ): Diagnostic[] {
 	const diagnostics: Diagnostic[] = [];
 	const paragraphs = splitParagraphsWithOffsets(text);
@@ -391,7 +504,12 @@ export function applyHeuristics(
 			continue;
 		}
 		const severity = severityBySlug[rule.slug] ?? rule.severity;
-		for (const range of rule.run(text, sentences, paragraphs)) {
+		for (const range of rule.run(
+			text,
+			sentences,
+			paragraphs,
+			protectedRanges,
+		)) {
 			if (range.end > range.start) {
 				diagnostics.push({
 					ruleSlug: rule.slug,
@@ -400,6 +518,7 @@ export function applyHeuristics(
 					end: range.end,
 					message: rule.message,
 					packId: rule.packId,
+					...(range.fix === undefined ? {} : { fix: range.fix }),
 				});
 			}
 		}

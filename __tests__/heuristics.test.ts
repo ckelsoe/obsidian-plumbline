@@ -151,3 +151,99 @@ describe('applyHeuristics', () => {
 		expect(run('He kept the promise he made in the spring.')).toEqual([]);
 	});
 });
+
+describe('repeated-word', () => {
+	const hits = (text: string) =>
+		run(text)
+			.filter((d) => d.ruleSlug === 'repeated-word')
+			.map((d) => ({ text: text.slice(d.start, d.end), fix: d.fix }));
+
+	it('flags a doubled word and offers the first copy as the fix', () => {
+		expect(hits('We went to the the store.')).toEqual([
+			{ text: 'the the', fix: 'the' },
+		]);
+	});
+
+	it('catches the copies across a line break, the classic slip', () => {
+		expect(hits('We went to the\nthe store.')).toEqual([
+			{ text: 'the\nthe', fix: 'the' },
+		]);
+	});
+
+	it('catches a list continuation line', () => {
+		expect(hits('- We went to the\n  the store.')).toEqual([
+			{ text: 'the\n  the', fix: 'the' },
+		]);
+	});
+
+	it('matches case-insensitively and keeps the first copy as written', () => {
+		expect(hits('The the store was shut.')).toEqual([
+			{ text: 'The the', fix: 'The' },
+		]);
+	});
+
+	it('gives one finding for a tripled word, not two overlapping ones', () => {
+		expect(hits('a b the the the c')).toEqual([
+			{ text: 'the the', fix: 'the' },
+		]);
+	});
+
+	it('does not flag words correctly doubled in English', () => {
+		expect(hits('By noon he had had enough.')).toEqual([]);
+		expect(hits('She said that that was fine.')).toEqual([]);
+		expect(hits('What it is is plain.')).toEqual([]);
+	});
+
+	it('does not flag a place name with both copies capitalized', () => {
+		expect(hits('They drove to Walla Walla.')).toEqual([]);
+	});
+
+	it('does not flag across punctuation or a paragraph break', () => {
+		expect(hits('He left. Left for good.')).toEqual([]);
+		expect(hits('Go, go home.')).toEqual([]);
+		expect(hits('It ended with the\n\nthe next one began.')).toEqual([]);
+	});
+
+	it('does not flag a word inside a longer one', () => {
+		expect(hits('Read the theme.')).toEqual([]);
+		// "voil" in "voilà" is not a word, so it cannot pair with anything.
+		expect(hits('voil voilà')).toEqual([]);
+	});
+
+	it('flags a doubled "I", which is never a place name', () => {
+		expect(hits('Then I I went home.')).toEqual([
+			{ text: 'I I', fix: 'I' },
+		]);
+	});
+
+	it('reads a contraction as one word, with either apostrophe', () => {
+		expect(hits("The can can't be opened.")).toEqual([]);
+		expect(hits('The can can’t be opened.')).toEqual([]);
+	});
+
+	it('does not flag an emphatic "do do"', () => {
+		expect(hits('I do do the dishes.')).toEqual([]);
+	});
+
+	it('catches the copies across a Windows line break', () => {
+		expect(hits('We went to the\r\nthe store.')).toEqual([
+			{ text: 'the\r\nthe', fix: 'the' },
+		]);
+	});
+
+	// Protected text reaches the heuristics masked to spaces, so only the span
+	// list can tell a masked gap from typed whitespace.
+	it('does not pair copies across a protected span', () => {
+		const text = 'the\n   the';
+		const masked = applyHeuristics(
+			text,
+			splitSentencesWithOffsets(text),
+			new Set(),
+			{},
+			[{ start: 4, end: 7 }],
+		).filter((d) => d.ruleSlug === 'repeated-word');
+		expect(masked).toEqual([]);
+		// The same text with no span is typed indentation, and is flagged.
+		expect(hits(text)).toEqual([{ text, fix: 'the' }]);
+	});
+});
