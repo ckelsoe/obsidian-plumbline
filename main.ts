@@ -1,4 +1,11 @@
-import { MarkdownView, Menu, Notice, Plugin, WorkspaceLeaf } from 'obsidian';
+import {
+	getLanguage,
+	MarkdownView,
+	Menu,
+	Notice,
+	Plugin,
+	WorkspaceLeaf,
+} from 'obsidian';
 import { PlumblineSettingTab } from './settings-tab';
 import { AnalysisService } from './analysis-service';
 import { formatPauseTime, isPauseMinutes, PauseState } from './pause-state';
@@ -508,7 +515,9 @@ export default class PlumblinePlugin extends Plugin {
 				this.pauseTimer = null;
 				this.applyPauseChange();
 			}, until - Date.now());
-			new Notice(`Plumbline: paused until ${formatPauseTime(until)}.`);
+			new Notice(
+				`Plumbline: paused until ${formatPauseTime(until, getLanguage())}.`,
+			);
 		}
 		this.applyPauseChange();
 	}
@@ -1654,10 +1663,8 @@ export default class PlumblinePlugin extends Plugin {
 	// other one and the panel would be filled with a different note's findings.
 	private refreshFor(view: MarkdownView): void {
 		const now = Date.now();
-		const pausedText = this.pause.statusText(
-			view.file?.path,
-			now,
-			formatPauseTime,
+		const pausedText = this.pause.statusText(view.file?.path, now, (ms) =>
+			formatPauseTime(ms, getLanguage()),
 		);
 		if (pausedText !== null) {
 			this.lastView = view;
