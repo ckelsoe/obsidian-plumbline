@@ -1,6 +1,14 @@
-import { MarkdownView, Notice, Plugin, WorkspaceLeaf } from 'obsidian';
+import {
+	MarkdownView,
+	Menu,
+	moment,
+	Notice,
+	Plugin,
+	WorkspaceLeaf,
+} from 'obsidian';
 import { PlumblineSettingTab } from './settings-tab';
 import { AnalysisService } from './analysis-service';
+import { isPauseMinutes, PauseState } from './pause-state';
 import { rhythmStatusText, rhythmDetail } from './rhythm-format';
 import type { EditorView } from '@codemirror/view';
 import { plumblineDecorations, relintEditor } from './editor-decorations';
@@ -132,11 +140,14 @@ export interface PlumblineSettings {
 	// Whether flagged phrases are underlined in the editor, and whether the
 	// underline yields to Annoteca's open comments. Interop-contract 5.1.
 	inlineUnderlines: InlineUnderlines;
+	// How long "pause everywhere for a while" lasts, in minutes.
+	pauseMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: PlumblineSettings = {
 	activeProfile: 'devotional-nonfiction',
 	inlineUnderlines: DEFAULT_INLINE_UNDERLINES,
+	pauseMinutes: 30,
 };
 
 // Debounce for live re-analysis while typing, in milliseconds.
@@ -162,6 +173,10 @@ export default class PlumblinePlugin extends Plugin {
 	}
 	private statusBar: HTMLElement | null = null;
 	private refreshTimer: number | null = null;
+	private readonly pause = new PauseState();
+	// Re-lints when a timed pause runs out, so the underlines come back without
+	// waiting for a keystroke.
+	private pauseTimer: number | null = null;
 	// The most recent markdown analysis, so a panel opened later can populate at
 	// once and keeps showing while a non-editor pane (like the panel) is focused.
 	private lastResult: LintResult | null = null;
@@ -199,6 +214,11 @@ export default class PlumblinePlugin extends Plugin {
 		await this.references.load();
 		await this.migrateScriptureFolder();
 		this.statusBar = this.addStatusBarItem();
+		// The status bar is the one-click way to pause and resume.
+		this.statusBar.addClass('mod-clickable');
+		this.registerDomEvent(this.statusBar, 'click', (evt) => {
+			this.pauseMenu().showAtMouseEvent(evt);
+		});
 		this.settingTab = new PlumblineSettingTab(this.app, this);
 		this.addSettingTab(this.settingTab);
 
@@ -209,6 +229,12 @@ export default class PlumblinePlugin extends Plugin {
 				{
 					disableRule: (slug, view) => {
 						void this.disableRuleForView(slug, view);
+					},
+					pauseNote: (view) => {
+						const path = this.markdownViewFor(view)?.file?.path;
+						if (path !== undefined) {
+							this.pauseNote(path);
+						}
 					},
 					canReplace: (view, from, to) =>
 						this.canReplaceRange(view, from, to),
@@ -224,6 +250,7 @@ export default class PlumblinePlugin extends Plugin {
 					inlineUnderlines: () => this.settings.inlineUnderlines,
 					commentAnchors: (text) => this.commentAnchorsFor(text),
 				},
+				(path) => this.pause.isPaused(path, Date.now()),
 			),
 		);
 
@@ -245,7 +272,19 @@ export default class PlumblinePlugin extends Plugin {
 		// Switching notes recomputes at once; typing recomputes debounced.
 		this.registerEvent(
 			this.app.workspace.on('active-leaf-change', () => {
-				this.refresh();
+				const path = this.analysis.activeMarkdownView()?.file?.path;
+				if (path === undefined || !this.endNotePause(path)) {
+					this.refresh();
+				}
+			}),
+		);
+		// Following a link replaces the note in the same leaf, which is leaving
+		// it just as much as switching tabs is.
+		this.registerEvent(
+			this.app.workspace.on('file-open', (file) => {
+				if (file) {
+					this.endNotePause(file.path);
+				}
 			}),
 		);
 		this.registerEvent(
@@ -329,6 +368,47 @@ export default class PlumblinePlugin extends Plugin {
 			},
 		});
 		this.addCommand({
+			id: 'pause-in-this-note',
+			name: 'Pause checks in this note until you switch notes',
+			checkCallback: (checking) => {
+				const path = this.analysis.activeMarkdownView()?.file?.path;
+				if (path === undefined) {
+					return false;
+				}
+				if (!checking) {
+					this.pauseNote(path);
+				}
+				return true;
+			},
+		});
+		this.addCommand({
+			id: 'pause-for-a-while',
+			name: 'Pause checks everywhere for a while',
+			callback: () => {
+				this.pauseEverywhere(this.settings.pauseMinutes);
+			},
+		});
+		this.addCommand({
+			id: 'pause-everywhere',
+			name: 'Pause checks everywhere until resumed',
+			callback: () => {
+				this.pauseEverywhere(null);
+			},
+		});
+		this.addCommand({
+			id: 'resume-checks',
+			name: 'Resume checks',
+			checkCallback: (checking) => {
+				if (!this.pause.any(Date.now())) {
+					return false;
+				}
+				if (!checking) {
+					this.resumeChecks();
+				}
+				return true;
+			},
+		});
+		this.addCommand({
 			id: 'show-kdp-disclosure',
 			name: 'Show AI disclosure for the active note',
 			callback: () => {
@@ -405,7 +485,111 @@ export default class PlumblinePlugin extends Plugin {
 		return group.extends.includes(SCRIPTURE_PACK_ID);
 	}
 
+	// Pause every check in one note until another note is opened.
+	pauseNote(path: string): void {
+		this.pause.pauseNote(path);
+		new Notice('Plumbline: paused in this note until you switch notes.');
+		this.applyPauseChange();
+	}
+
+	// Pause every check in every note, for `minutes` or, given null, until
+	// resumed.
+	pauseEverywhere(minutes: number | null): void {
+		this.clearPauseTimer();
+		if (minutes === null) {
+			this.pause.pauseEverywhere(Infinity);
+			new Notice('Plumbline: paused until you resume it.');
+		} else {
+			const until = Date.now() + minutes * 60_000;
+			this.pause.pauseEverywhere(until);
+			this.pauseTimer = window.setTimeout(() => {
+				this.pauseTimer = null;
+				this.applyPauseChange();
+			}, until - Date.now());
+			new Notice(
+				`Plumbline: paused until ${moment(until).format('LT')}.`,
+			);
+		}
+		this.applyPauseChange();
+	}
+
+	resumeChecks(): void {
+		this.clearPauseTimer();
+		this.pause.resume();
+		new Notice('Plumbline: checking again.');
+		this.applyPauseChange();
+	}
+
+	// End a note pause because `path` is now the open note. Re-lints when one
+	// ended, since the paused note may still be open in another leaf. Returns
+	// whether it did, so a caller about to refresh anyway can skip its own.
+	private endNotePause(path: string): boolean {
+		if (!this.pause.noteOpened(path)) {
+			return false;
+		}
+		this.applyConfigChange();
+		return true;
+	}
+
+	// Re-lint after a pause starts or ends. With the flags panel focused there is
+	// no active note, so refresh() leaves the panel and status bar as they were,
+	// and after a resume they would go on saying paused. Refresh the note they
+	// show instead.
+	private applyPauseChange(): void {
+		this.applyConfigChange();
+		if (!this.analysis.activeMarkdownView() && this.lastView?.file) {
+			this.refreshFor(this.lastView);
+		}
+	}
+
+	private clearPauseTimer(): void {
+		if (this.pauseTimer !== null) {
+			window.clearTimeout(this.pauseTimer);
+			this.pauseTimer = null;
+		}
+	}
+
+	// The status bar's click menu: the same pauses the commands offer.
+	private pauseMenu(): Menu {
+		const menu = new Menu();
+		const path = this.analysis.activeMarkdownView()?.file?.path;
+		if (path !== undefined) {
+			menu.addItem((item) =>
+				item
+					.setTitle('Pause in this note until you switch notes')
+					.setIcon('file-x')
+					.onClick(() => this.pauseNote(path)),
+			);
+		}
+		menu.addItem((item) =>
+			item
+				.setTitle(
+					`Pause everywhere for ${this.settings.pauseMinutes} minutes`,
+				)
+				.setIcon('timer')
+				.onClick(() =>
+					this.pauseEverywhere(this.settings.pauseMinutes),
+				),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle('Pause everywhere until resumed')
+				.setIcon('pause')
+				.onClick(() => this.pauseEverywhere(null)),
+		);
+		if (this.pause.any(Date.now())) {
+			menu.addItem((item) =>
+				item
+					.setTitle('Resume checks')
+					.setIcon('play')
+					.onClick(() => this.resumeChecks()),
+			);
+		}
+		return menu;
+	}
+
 	onunload(): void {
+		this.clearPauseTimer();
 		this.clearRefreshTimer();
 		this.references.dispose();
 	}
@@ -429,6 +613,9 @@ export default class PlumblinePlugin extends Plugin {
 			inlineUnderlines: isInlineUnderlines(record.inlineUnderlines)
 				? record.inlineUnderlines
 				: DEFAULT_SETTINGS.inlineUnderlines,
+			pauseMinutes: isPauseMinutes(record.pauseMinutes)
+				? record.pauseMinutes
+				: DEFAULT_SETTINGS.pauseMinutes,
 		};
 		// 0.2.1 stored a flat scriptureFolder setting. It is read once here so
 		// onload can migrate it into a reference; it is no longer a setting, so
@@ -445,7 +632,12 @@ export default class PlumblinePlugin extends Plugin {
 
 	// Push the most recent analysis into a panel (called by the panel on open).
 	populateFindings(panel: FindingsView): void {
-		if (this.lastResult && this.lastView) {
+		if (
+			this.lastView &&
+			this.pause.isPaused(this.lastView.file?.path, Date.now())
+		) {
+			panel.showPaused();
+		} else if (this.lastResult && this.lastView) {
 			panel.update(this.lastResult, this.lastView);
 		}
 	}
@@ -1459,6 +1651,22 @@ export default class PlumblinePlugin extends Plugin {
 	// mousedown, before focus moves, so in a split the active leaf is still the
 	// other one and the panel would be filled with a different note's findings.
 	private refreshFor(view: MarkdownView): void {
+		const now = Date.now();
+		const pausedText = this.pause.statusText(view.file?.path, now, (ms) =>
+			moment(ms).format('LT'),
+		);
+		if (pausedText !== null) {
+			this.lastView = view;
+			this.statusBar?.setText(pausedText);
+			for (const leaf of this.app.workspace.getLeavesOfType(
+				FINDINGS_VIEW_TYPE,
+			)) {
+				if (leaf.view instanceof FindingsView) {
+					leaf.view.showPaused();
+				}
+			}
+			return;
+		}
 		const result = this.analysis.analyze(view);
 		this.lastResult = result;
 		this.lastView = view;

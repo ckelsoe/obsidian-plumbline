@@ -120,6 +120,7 @@ function findingsIn(state: EditorState): Diagnostic[] {
 // caller of lint() in the editor path.
 function findingsPass(
 	getConfig: (text: string, path?: string) => ResolvedConfig,
+	isPaused: (path?: string) => boolean,
 ): Extension {
 	return ViewPlugin.fromClass(
 		class {
@@ -178,9 +179,13 @@ function findingsPass(
 				const text = this.view.state.doc.toString();
 				const path = this.view.state.field(editorInfoField, false)?.file
 					?.path;
-				const result = lint(text, getConfig(text, path));
+				// A paused note is not linted at all, so pausing also stops the
+				// cost of a pass on every keystroke.
+				const diagnostics = isPaused(path)
+					? []
+					: lint(text, getConfig(text, path)).diagnostics;
 				this.view.dispatch({
-					effects: setFindings.of(result.diagnostics),
+					effects: setFindings.of(diagnostics),
 				});
 			}
 
@@ -354,6 +359,19 @@ function renderFinding(
 	});
 	off.addEventListener('click', () => {
 		actions.disableRule(diagnostic.ruleSlug, view);
+	});
+	const pause = row.createEl('button', {
+		cls: 'plumbline-hover-action',
+		text: 'Pause in this note',
+		attr: {
+			type: 'button',
+			'aria-label':
+				'Pause every check in this note until you switch notes',
+			title: 'Stop checking this note until you switch to another one. Nothing is written to the note.',
+		},
+	});
+	pause.addEventListener('click', () => {
+		actions.pauseNote(view);
 	});
 	return el;
 }
@@ -723,6 +741,9 @@ export interface DecorationActions {
 	// stays up across a leaf change, so a click could put the rule in a
 	// different file from the one whose finding was clicked.
 	disableRule(slug: string, view: EditorView): void;
+	// Pause every check for the note this editor is showing, until another
+	// note is opened. Passed the view for the same reason as disableRule.
+	pauseNote(view: EditorView): void;
 	// Whether Plumbline may replace this range.
 	//
 	// Interop-contract 4.1 makes Annoteca the only writer of note prose, so a
@@ -752,10 +773,11 @@ export function plumblineDecorations(
 	getConfig: (text: string, path?: string) => ResolvedConfig,
 	actions: DecorationActions,
 	yieldTo: YieldSource,
+	isPaused: (path?: string) => boolean,
 ): Extension {
 	return [
 		findingsField,
-		findingsPass(getConfig),
+		findingsPass(getConfig, isPaused),
 		EditorView.decorations.compute([findingsField], (state) =>
 			buildUnderlines(state, yieldTo),
 		),
