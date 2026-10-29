@@ -1,14 +1,14 @@
 import {
+	getLanguage,
 	MarkdownView,
 	Menu,
-	moment,
 	Notice,
 	Plugin,
 	WorkspaceLeaf,
 } from 'obsidian';
 import { PlumblineSettingTab } from './settings-tab';
 import { AnalysisService } from './analysis-service';
-import { isPauseMinutes, PauseState } from './pause-state';
+import { formatPauseTime, isPauseMinutes, PauseState } from './pause-state';
 import { rhythmStatusText, rhythmDetail } from './rhythm-format';
 import type { EditorView } from '@codemirror/view';
 import { plumblineDecorations, relintEditor } from './editor-decorations';
@@ -516,7 +516,7 @@ export default class PlumblinePlugin extends Plugin {
 				this.applyPauseChange();
 			}, until - Date.now());
 			new Notice(
-				`Plumbline: paused until ${moment(until).format('LT')}.`,
+				`Plumbline: paused until ${formatPauseTime(until, getLanguage())}.`,
 			);
 		}
 		this.applyPauseChange();
@@ -1664,7 +1664,7 @@ export default class PlumblinePlugin extends Plugin {
 	private refreshFor(view: MarkdownView): void {
 		const now = Date.now();
 		const pausedText = this.pause.statusText(view.file?.path, now, (ms) =>
-			moment(ms).format('LT'),
+			formatPauseTime(ms, getLanguage()),
 		);
 		if (pausedText !== null) {
 			this.lastView = view;

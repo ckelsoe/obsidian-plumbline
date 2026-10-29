@@ -19,6 +19,23 @@ export function isPauseMinutes(value: unknown): value is number {
 	);
 }
 
+// A pause's end time as clock time ("3:45 PM") in `locale`, which the caller
+// passes as Obsidian's app language so the time reads like the rest of the UI.
+// Built-in Intl formatting rather than Obsidian's re-exported moment, which the
+// marketplace scan types as `any` and flags at every call. A code Intl does not
+// accept throws a RangeError, so that falls back to the runtime default.
+export function formatPauseTime(ms: number, locale: string): string {
+	const options: Intl.DateTimeFormatOptions = {
+		hour: 'numeric',
+		minute: '2-digit',
+	};
+	try {
+		return new Date(ms).toLocaleTimeString(locale, options);
+	} catch {
+		return new Date(ms).toLocaleTimeString([], options);
+	}
+}
+
 export class PauseState {
 	private notePath: string | null = null;
 	// Epoch ms the everywhere pause ends at. Infinity means until resumed.

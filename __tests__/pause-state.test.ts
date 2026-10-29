@@ -1,4 +1,4 @@
-import { isPauseMinutes, PauseState } from '../pause-state';
+import { formatPauseTime, isPauseMinutes, PauseState } from '../pause-state';
 
 const time = (ms: number): string => `t${ms}`;
 
@@ -71,5 +71,27 @@ describe('isPauseMinutes', () => {
 		expect(isPauseMinutes(-5)).toBe(false);
 		expect(isPauseMinutes(Number.NaN)).toBe(false);
 		expect(isPauseMinutes('30')).toBe(false);
+	});
+});
+
+describe('formatPauseTime', () => {
+	const ms = Date.UTC(2026, 0, 1, 15, 5);
+
+	it('formats in the given locale', () => {
+		expect(formatPauseTime(ms, 'de')).toBe(
+			new Date(ms).toLocaleTimeString('de', {
+				hour: 'numeric',
+				minute: '2-digit',
+			}),
+		);
+	});
+
+	it('falls back to the default locale for a code Intl rejects', () => {
+		expect(formatPauseTime(ms, 'not a locale!')).toBe(
+			new Date(ms).toLocaleTimeString([], {
+				hour: 'numeric',
+				minute: '2-digit',
+			}),
+		);
 	});
 });
