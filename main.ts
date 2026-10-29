@@ -1657,6 +1657,12 @@ export default class PlumblinePlugin extends Plugin {
 		);
 		if (pausedText !== null) {
 			this.lastView = view;
+			// The public API still serves findings for a paused note, so its
+			// subscribers still need to hear that the note changed.
+			const pausedPath = view.file?.path;
+			if (pausedPath !== undefined) {
+				this.api.emitFindingsChanged(pausedPath);
+			}
 			this.statusBar?.setText(pausedText);
 			for (const leaf of this.app.workspace.getLeavesOfType(
 				FINDINGS_VIEW_TYPE,
