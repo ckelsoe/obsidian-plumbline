@@ -11,6 +11,7 @@ import {
 	GroupDefinition,
 	DEVOTIONAL_NONFICTION_ID,
 	PLAIN_NONFICTION_ID,
+	STARTER_GROUPS,
 	starterGroup,
 } from '../engine/groups';
 import { EMPTY_VAULT_CONFIG, VaultConfig } from '../engine/vault-config';
@@ -127,10 +128,10 @@ describe('findGroup and allGroups', () => {
 
 	it('lists the starters first, then the user groups', () => {
 		expect(allGroups(groups).map((g) => g.id)).toEqual([
-			DEVOTIONAL_NONFICTION_ID,
-			PLAIN_NONFICTION_ID,
+			...STARTER_GROUPS.map((g) => g.id),
 			'my-fiction',
 		]);
+		expect(allGroups(groups)[0]?.id).toBe(DEVOTIONAL_NONFICTION_ID);
 	});
 });
 

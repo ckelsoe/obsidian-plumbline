@@ -1,7 +1,6 @@
 import { Rule, Severity } from './types';
 import { asSeverity, asStringArray } from './vault-config';
-import { BASE_RULES } from './packs';
-import { SCRIPTURE_RULES } from './scripture';
+import { ALL_PACK_RULES } from './genre-packs';
 import { HEURISTIC_RULES } from './heuristics';
 
 // Custom checks are the user's own library entries: phrase checks they create,
@@ -40,8 +39,7 @@ export interface CustomCheck {
 // one of these, or it would appear twice in a resolved group (once from the pack,
 // once from the store) and its edits would fight the locked built-in.
 const BUILTIN_SLUGS: ReadonlySet<string> = new Set([
-	...BASE_RULES.map((rule) => rule.slug),
-	...SCRIPTURE_RULES.map((rule) => rule.slug),
+	...ALL_PACK_RULES.map((rule) => rule.slug),
 	...HEURISTIC_RULES.map((rule) => rule.slug),
 ]);
 

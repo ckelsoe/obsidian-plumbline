@@ -1,11 +1,15 @@
 import { ResolvedConfig, Rule, Severity } from './types';
 import { BASE_SPAN_KINDS } from './protected-spans';
-import { BASE_RULES, BASE_PACK_ID } from './packs';
+import { BASE_PACK_ID } from './packs';
+import { SCRIPTURE_PACK_ID } from './scripture';
 import {
-	SCRIPTURE_RULES,
-	SCRIPTURE_PACK_ID,
-	SCRIPTURE_SPAN_KIND,
-} from './scripture';
+	BUSINESS_PACK_ID,
+	FICTION_PACK_ID,
+	MARKETING_PACK_ID,
+	PACK_EXTRA_SPAN_KINDS,
+	PACK_RULES,
+	TECHNICAL_PACK_ID,
+} from './genre-packs';
 import { HEURISTIC_RULES } from './heuristics';
 import { DEFAULT_ROLLUP_THRESHOLD } from './rollup';
 
@@ -49,31 +53,30 @@ export interface GroupDefinition {
 
 export const DEVOTIONAL_NONFICTION_ID = 'devotional-nonfiction';
 export const PLAIN_NONFICTION_ID = 'plain-nonfiction';
+export const BUSINESS_WRITING_ID = 'business-writing';
+export const TECHNICAL_WRITING_ID = 'technical-writing';
+export const FICTION_ID = 'fiction';
+export const MEMOIR_ID = 'creative-nonfiction';
+export const ACADEMIC_ID = 'academic';
+export const MARKETING_COPY_ID = 'marketing-copy';
 
-// The mechanical rules and the extra protected-span kind each pack contributes.
-// Every group extends the base pack, whose span kinds (code, headings,
-// frontmatter, comments) are always on and are added up front, so the base pack
-// contributes no extra span here. The cross-sentence heuristics belong to the
+// The mechanical rules and the extra protected-span kind each pack contributes
+// live in genre-packs.ts (PACK_RULES, PACK_EXTRA_SPAN_KINDS). Every group extends
+// the base pack, whose span kinds (code, headings, frontmatter, comments) are
+// always on and are added up front. The cross-sentence heuristics belong to the
 // base pack too but apply to every group regardless of `extends`, so they are
-// added separately below, not through this map.
-const PACK_MECHANICAL: Record<string, Rule[]> = {
-	[BASE_PACK_ID]: BASE_RULES,
-	[SCRIPTURE_PACK_ID]: SCRIPTURE_RULES,
-};
-
-const PACK_EXTRA_SPAN_KINDS: Record<string, string[]> = {
-	[SCRIPTURE_PACK_ID]: [SCRIPTURE_SPAN_KIND],
-};
+// added separately below, not through that map.
 
 const HEURISTIC_SLUGS: ReadonlySet<string> = new Set(
 	HEURISTIC_RULES.map((rule) => rule.slug),
 );
 
-// The built-in starter groups. Their `checks` maps are empty: each turns on every
-// check in the packs it extends at that check's default tuning, which is exactly
-// what the single hardcoded profile did before groups existed. Devotional
+// The built-in starter groups. The first two have empty `checks` maps: each turns
+// on every check in the packs it extends at that check's default tuning, which is
+// exactly what the single hardcoded profile did before groups existed. Devotional
 // nonfiction reproduces the former `scripture-book` profile; plain nonfiction is
-// the base pack on its own.
+// the base pack on its own. The genre starters after them add a genre pack and
+// retune the base checks that misfire in that genre.
 const DEVOTIONAL_NONFICTION: GroupDefinition = {
 	id: DEVOTIONAL_NONFICTION_ID,
 	name: 'Devotional nonfiction',
@@ -92,9 +95,101 @@ const PLAIN_NONFICTION: GroupDefinition = {
 	checks: {},
 };
 
+// Clarity over voice: the register checks matter more here, so they warn.
+const BUSINESS_WRITING: GroupDefinition = {
+	id: BUSINESS_WRITING_ID,
+	name: 'Business writing',
+	builtIn: true,
+	extends: [BASE_PACK_ID, BUSINESS_PACK_ID],
+	rollupThreshold: DEFAULT_ROLLUP_THRESHOLD,
+	checks: {
+		'wordy-substitute': { severity: 'warning' },
+	},
+};
+
+// Parallel steps are correct in documentation, so anaphora is off, and a pivot
+// is often just how a caveat is stated. A bare "This" with no noun is the
+// ambiguity documentation cannot afford, so it warns.
+const TECHNICAL_WRITING: GroupDefinition = {
+	id: TECHNICAL_WRITING_ID,
+	name: 'Technical writing',
+	builtIn: true,
+	extends: [BASE_PACK_ID, TECHNICAL_PACK_ID],
+	rollupThreshold: DEFAULT_ROLLUP_THRESHOLD,
+	checks: {
+		anaphora: { enabled: false },
+		'rhetorical-pivot': { severity: 'suggestion' },
+		'demonstrative-opener': { severity: 'warning' },
+	},
+};
+
+// A scene may open cinematically and repeat a phrase on purpose, and a fragment
+// is a normal beat. Quoted dialogue is masked by the fiction pack.
+const FICTION: GroupDefinition = {
+	id: FICTION_ID,
+	name: 'Fiction',
+	builtIn: true,
+	extends: [BASE_PACK_ID, FICTION_PACK_ID],
+	rollupThreshold: DEFAULT_ROLLUP_THRESHOLD,
+	checks: {
+		'cinematic-opener': { enabled: false },
+		anaphora: { enabled: false },
+		'emphasis-fragment': { severity: 'suggestion' },
+	},
+};
+
+// Fiction's rhythm for true events. Remembered dialogue is still masked, but a
+// memoirist reporting what someone said gets no dialogue-tag lecture.
+const MEMOIR: GroupDefinition = {
+	id: MEMOIR_ID,
+	name: 'Creative nonfiction and memoir',
+	builtIn: true,
+	extends: [BASE_PACK_ID, FICTION_PACK_ID],
+	rollupThreshold: DEFAULT_ROLLUP_THRESHOLD,
+	checks: {
+		'cinematic-opener': { enabled: false },
+		anaphora: { enabled: false },
+		'emphasis-fragment': { severity: 'suggestion' },
+		'said-bookism': { enabled: false },
+	},
+};
+
+// Measured hedging is correct in research writing, so the hedge checks only
+// suggest. Unsourced attribution stays a warning: it matters most here.
+const ACADEMIC: GroupDefinition = {
+	id: ACADEMIC_ID,
+	name: 'Academic and research',
+	builtIn: true,
+	extends: [BASE_PACK_ID],
+	rollupThreshold: DEFAULT_ROLLUP_THRESHOLD,
+	checks: {
+		'hedge-stack': { severity: 'suggestion' },
+		'personal-claims-vague': { severity: 'suggestion' },
+	},
+};
+
+// Punchy fragments are the form, so the fragment check is off. The hype words
+// are the tell here instead.
+const MARKETING_COPY: GroupDefinition = {
+	id: MARKETING_COPY_ID,
+	name: 'Marketing copy',
+	builtIn: true,
+	extends: [BASE_PACK_ID, MARKETING_PACK_ID],
+	rollupThreshold: DEFAULT_ROLLUP_THRESHOLD,
+	checks: {
+		'emphasis-fragment': { enabled: false },
+	},
+};
+
 export const STARTER_GROUPS: readonly GroupDefinition[] = [
 	DEVOTIONAL_NONFICTION,
 	PLAIN_NONFICTION,
+	BUSINESS_WRITING,
+	TECHNICAL_WRITING,
+	FICTION,
+	MEMOIR,
+	ACADEMIC,
+	MARKETING_COPY,
 ];
 
 // The former id of the devotional group, before the rename off "Scripture book".
@@ -104,8 +199,8 @@ const LEGACY_DEVOTIONAL_ID = 'scripture-book';
 
 // The group the resolver falls back to for an unknown group id, matching the old
 // behaviour where an unrecognised profile got the base pack alone. A note tagged
-// with a genre whose pack does not exist yet (fiction, technical) gets the
-// universal checks, never another genre's integrity rules. This is distinct from
+// with a group id that does not exist gets the universal checks, never another
+// genre's integrity rules. This is distinct from
 // the fresh-install default, which is the devotional flagship (DEFAULT_SETTINGS).
 export function fallbackGroup(): GroupDefinition {
 	return PLAIN_NONFICTION;
@@ -134,7 +229,7 @@ export function migrateGroupId(id: string): string {
 export function groupPackRules(group: GroupDefinition): Rule[] {
 	const rules: Rule[] = [];
 	for (const packId of group.extends) {
-		for (const rule of PACK_MECHANICAL[packId] ?? []) {
+		for (const rule of PACK_RULES[packId] ?? []) {
 			rules.push(rule);
 		}
 	}

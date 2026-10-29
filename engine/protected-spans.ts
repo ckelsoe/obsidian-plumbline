@@ -1,5 +1,6 @@
 import { ResolvedConfig, Span } from './types';
 import { scriptureSpans, SCRIPTURE_SPAN_KIND } from './scripture';
+import { dialogueSpans, DIALOGUE_SPAN_KIND } from './genre-packs';
 
 // The comment span kinds, split so a user can mask Annoteca's structural markers
 // independently of their own plain HTML comments (they are disjoint: an Annoteca
@@ -226,6 +227,15 @@ export function protectedSpans(text: string, config: ResolvedConfig): Span[] {
 	}
 	if (kinds.has(SCRIPTURE_SPAN_KIND)) {
 		collected.push(...scriptureSpans(text));
+	}
+	if (kinds.has(DIALOGUE_SPAN_KIND)) {
+		// Over text with code and the other protected spans blanked, for the
+		// same reason as the comment scan: a quote character inside inline code
+		// would otherwise open a "speech" that swallows the rest of the
+		// paragraph. Masking preserves offsets.
+		collected.push(
+			...dialogueSpans(text, maskSpans(text, mergeSpans(collected))),
+		);
 	}
 	return mergeSpans(collected);
 }

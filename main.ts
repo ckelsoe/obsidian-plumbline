@@ -93,8 +93,9 @@ import {
 	hasFlatTuning,
 	buildMigratedGroup,
 } from './engine/group-store';
-import { BASE_PACK_ID, BASE_RULES } from './engine/packs';
-import { SCRIPTURE_PACK_ID, SCRIPTURE_RULES } from './engine/scripture';
+import { BASE_PACK_ID } from './engine/packs';
+import { SCRIPTURE_PACK_ID } from './engine/scripture';
+import { ALL_PACK_RULES } from './engine/genre-packs';
 import { DEFAULT_ROLLUP_THRESHOLD, CONFIDENCE } from './engine/rollup';
 
 // One check as the settings tab shows it, resolved against the active group: its
@@ -417,6 +418,14 @@ export default class PlumblinePlugin extends Plugin {
 		});
 
 		this.app.workspace.onLayoutReady(() => {
+			// One flags panel is all there is to show. A saved layout can hold
+			// more (a panel opened directly rather than through the ribbon), and
+			// two identical flag tabs read as two different panels.
+			for (const extra of this.app.workspace
+				.getLeavesOfType(FINDINGS_VIEW_TYPE)
+				.slice(1)) {
+				extra.detach();
+			}
 			this.refresh();
 			// Folder lookups need the vault index, which is complete only once the
 			// layout is ready, so reference validation waits for it. The vault
@@ -863,15 +872,19 @@ export default class PlumblinePlugin extends Plugin {
 		});
 	}
 
-	// Turn the scripture pack on or off for a user group. The base pack is always
-	// present, so only the scripture pack is toggled here.
-	async setGroupScripture(id: string, include: boolean): Promise<void> {
+	// Turn one optional pack on or off for a user group. The base pack is always
+	// present, so it is re-added whatever the toggle.
+	async setGroupPack(
+		id: string,
+		packId: string,
+		include: boolean,
+	): Promise<void> {
 		await this.mutateGroup(id, (group) => {
 			const packs = new Set(group.extends);
 			if (include) {
-				packs.add(SCRIPTURE_PACK_ID);
+				packs.add(packId);
 			} else {
-				packs.delete(SCRIPTURE_PACK_ID);
+				packs.delete(packId);
 			}
 			packs.add(BASE_PACK_ID);
 			group.extends = [...packs];
@@ -1417,9 +1430,7 @@ export default class PlumblinePlugin extends Plugin {
 		if (custom) {
 			return custom.phrases;
 		}
-		const rule = [...BASE_RULES, ...SCRIPTURE_RULES].find(
-			(r) => r.slug === slug,
-		);
+		const rule = ALL_PACK_RULES.find((r) => r.slug === slug);
 		return rule?.phrases;
 	}
 
