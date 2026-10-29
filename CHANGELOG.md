@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-29
+
 ### Added
 - **Six new starter groups**, each tuned for one kind of writing:
   - **Business writing** adds a business pack: jargon such as "circle back", "move the needle", and "synergy" (with plain replacements where one exists), and soft email openers like "just checking in". The wordy-substitute check warns instead of suggesting.
