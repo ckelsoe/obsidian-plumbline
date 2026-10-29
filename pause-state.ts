@@ -19,6 +19,16 @@ export function isPauseMinutes(value: unknown): value is number {
 	);
 }
 
+// A pause's end time as the reader's local clock time ("3:45 PM"). Built-in
+// Intl formatting rather than Obsidian's re-exported moment, which the
+// marketplace scan types as `any` and flags at every call.
+export function formatPauseTime(ms: number): string {
+	return new Date(ms).toLocaleTimeString([], {
+		hour: 'numeric',
+		minute: '2-digit',
+	});
+}
+
 export class PauseState {
 	private notePath: string | null = null;
 	// Epoch ms the everywhere pause ends at. Infinity means until resumed.

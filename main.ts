@@ -1,14 +1,7 @@
-import {
-	MarkdownView,
-	Menu,
-	moment,
-	Notice,
-	Plugin,
-	WorkspaceLeaf,
-} from 'obsidian';
+import { MarkdownView, Menu, Notice, Plugin, WorkspaceLeaf } from 'obsidian';
 import { PlumblineSettingTab } from './settings-tab';
 import { AnalysisService } from './analysis-service';
-import { isPauseMinutes, PauseState } from './pause-state';
+import { formatPauseTime, isPauseMinutes, PauseState } from './pause-state';
 import { rhythmStatusText, rhythmDetail } from './rhythm-format';
 import type { EditorView } from '@codemirror/view';
 import { plumblineDecorations, relintEditor } from './editor-decorations';
@@ -515,9 +508,7 @@ export default class PlumblinePlugin extends Plugin {
 				this.pauseTimer = null;
 				this.applyPauseChange();
 			}, until - Date.now());
-			new Notice(
-				`Plumbline: paused until ${moment(until).format('LT')}.`,
-			);
+			new Notice(`Plumbline: paused until ${formatPauseTime(until)}.`);
 		}
 		this.applyPauseChange();
 	}
@@ -1663,8 +1654,10 @@ export default class PlumblinePlugin extends Plugin {
 	// other one and the panel would be filled with a different note's findings.
 	private refreshFor(view: MarkdownView): void {
 		const now = Date.now();
-		const pausedText = this.pause.statusText(view.file?.path, now, (ms) =>
-			moment(ms).format('LT'),
+		const pausedText = this.pause.statusText(
+			view.file?.path,
+			now,
+			formatPauseTime,
 		);
 		if (pausedText !== null) {
 			this.lastView = view;
