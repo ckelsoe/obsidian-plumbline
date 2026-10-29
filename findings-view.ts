@@ -28,6 +28,9 @@ export class FindingsView extends ItemView {
 	private readonly expanded = new Set<string>();
 	private showAll = false;
 	private targetPath: string | undefined;
+	// The note in front of the writer is paused, so there is no analysis to
+	// show. Said outright, because "No flags" would read as a clean note.
+	private paused = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PlumblinePlugin) {
 		super(leaf);
@@ -72,6 +75,13 @@ export class FindingsView extends ItemView {
 		}
 		this.result = result;
 		this.targetView = targetView;
+		this.paused = false;
+		this.render();
+	}
+
+	// Called instead of update when the note's checks are paused.
+	showPaused(): void {
+		this.paused = true;
 		this.render();
 	}
 
@@ -178,6 +188,13 @@ export class FindingsView extends ItemView {
 		const container = this.contentEl;
 		container.empty();
 		container.addClass('plumbline-findings');
+		if (this.paused) {
+			container.createEl('p', {
+				cls: 'plumbline-findings-empty',
+				text: 'Checks are paused for this note.',
+			});
+			return;
+		}
 		if (!this.result || !this.targetView) {
 			container.createEl('p', {
 				cls: 'plumbline-findings-empty',

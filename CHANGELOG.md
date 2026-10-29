@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Pause checks** without touching the note. Pause the note you are editing until you switch to another note, pause everywhere for a while, or pause everywhere until you resume. Start a pause from the command palette, from the Plumbline status bar item (click it for a menu), or from the new **Pause in this note** button in a finding's popup. While paused, the status bar says so and the flags panel reads "Checks are paused for this note." A pause lives in memory only, so a restart always resumes.
+- A **Pause length in minutes** setting (default 30) for the timed pause.
+
 ## [0.7.0] - 2026-10-25
 
 ### Added

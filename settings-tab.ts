@@ -22,6 +22,7 @@ import {
 	type ReferenceType,
 } from './engine/reference-store';
 import { PathSuggest } from './path-suggest';
+import { isPauseMinutes, MAX_PAUSE_MINUTES } from './pause-state';
 
 // Community discussion for this plugin. This must stay a never-expiring
 // discord.gg invite. A discord.com/channels/... deep link only resolves for
@@ -148,6 +149,22 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
+				heading: 'Pausing',
+				items: [
+					{
+						name: 'Pause length in minutes',
+						desc: 'How long "Pause checks everywhere for a while" lasts, up to a day (1440). Click the status bar item or use the command palette to pause or resume. A pause never outlasts a restart.',
+						control: {
+							type: 'number',
+							key: 'pauseMinutes',
+							min: 1,
+							max: MAX_PAUSE_MINUTES,
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
 				heading: 'Comments',
 				items: this.plugin.commentSpanStates().map((state) => ({
 					name: state.name,
@@ -230,6 +247,10 @@ export class PlumblineSettingTab extends PluginSettingTab {
 			await this.withActiveGroupRerender(() =>
 				this.plugin.setRollupThreshold(Number(value)),
 			);
+			return;
+		}
+		// An emptied or zero field would make a pause end the moment it starts.
+		if (key === 'pauseMinutes' && !isPauseMinutes(value)) {
 			return;
 		}
 		(this.plugin.settings as unknown as Record<string, unknown>)[key] =
