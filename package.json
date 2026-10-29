@@ -1,6 +1,6 @@
 {
 	"name": "plumbline",
-	"version": "0.8.0",
+	"version": "0.8.1",
 	"description": "Flag AI-shaped writing, and check your prose against your own style guide, sources, and character names.",
 	"main": "main.js",
 	"type": "module",

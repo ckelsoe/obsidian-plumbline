@@ -8,8 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-29
+
 ### Fixed
-- The pause end time is formatted with the built-in clock format instead of Obsidian's `moment`, which the marketplace scan typed as `any` and flagged as unsafe calls.
+- The pause end time is formatted with the built-in clock format in Obsidian's app language, instead of Obsidian's `moment`, which the marketplace scan typed as `any` and flagged as unsafe calls.
 
 ## [0.8.0] - 2026-10-29
 
