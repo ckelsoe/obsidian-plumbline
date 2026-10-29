@@ -9,8 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Six new starter groups**, each tuned for one kind of writing:
+  - **Business writing** adds a business pack: jargon such as "circle back", "move the needle", and "synergy" (with plain replacements where one exists), and soft email openers like "just checking in". The wordy-substitute check warns instead of suggesting.
+  - **Technical writing** adds a technical pack: minimizers ("simply", "obviously", "just run"), future tense in instructions ("will appear"), and politeness filler ("please note"). Anaphora is off, since parallel steps are correct in documentation, and a bare "This" opening a sentence warns.
+  - **Fiction** adds a fiction pack: stock phrases that read as generated ("a breath she didn't know she was holding", "eyes widened"), filter words ("she felt", "he noticed"), and showy dialogue tags ("he retorted", "said softly"). Quoted dialogue is left unchecked, since it is a character's voice, not yours. The cinematic-opener and anaphora checks are off and fragments only suggest.
+  - **Creative nonfiction and memoir** uses the fiction pack without the dialogue-tag check.
+  - **Academic and research** keeps the base checks but softens stacked hedges and vague personal claims to suggestions.
+  - **Marketing copy** adds a marketing pack: hype words ("unlock your", "seamless", "game-changing") and stock openers ("in today's fast-paced world"). The fragment check is off.
+- A note whose frontmatter already says `plumbline-profile: fiction` (or another new starter's id: `business-writing`, `technical-writing`, `creative-nonfiction`, `academic`, `marketing-copy`) now gets that group. Before, an unknown id fell back to Plain nonfiction.
+- The group editor has a toggle for each optional pack (scripture, business, technical, fiction, marketing), so a group of your own can combine them.
 - **Pause checks** without touching the note. Pause the note you are editing until you switch to another note, pause everywhere for a while, or pause everywhere until you resume. Start a pause from the command palette, from the Plumbline status bar item (click it for a menu), or from the new **Pause in this note** button in a finding's popup. While paused, the status bar says so and the flags panel reads "Checks are paused for this note." A pause lives in memory only, so a restart always resumes.
 - A **Pause length in minutes** setting (default 30) for the timed pause.
+
+### Fixed
+- Only one flags panel opens. A saved layout holding two copies of the panel showed two identical flag icons in the sidebar; the extra copies now close on load.
 
 ## [0.7.0] - 2026-10-25
 

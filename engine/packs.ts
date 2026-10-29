@@ -1,7 +1,8 @@
 import { Rule } from './types';
 
 // The base pack: universal AI-tell rules that every profile inherits. Genre packs
-// (scripture, and later scientific, technical, fiction) add to this. Rules are
+// (scripture.ts, and business, technical, fiction, and marketing in
+// genre-packs.ts) add to this. Rules are
 // data; adding one is a data edit, not an engine change. See config-model.md.
 export const BASE_PACK_ID = 'base';
 

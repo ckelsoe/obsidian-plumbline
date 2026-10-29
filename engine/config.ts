@@ -1,8 +1,7 @@
 import { ResolvedConfig, Rule, Severity } from './types';
 import { ANNOTECA_COMMENT_KIND, HTML_COMMENT_KIND } from './protected-spans';
 import { HEURISTIC_RULES } from './heuristics';
-import { BASE_RULES } from './packs';
-import { SCRIPTURE_RULES } from './scripture';
+import { ALL_PACK_RULES } from './genre-packs';
 import { CONFIDENCE } from './rollup';
 import { VaultConfig, mergeRules } from './vault-config';
 import {
@@ -241,14 +240,13 @@ function heuristicDescriptor(
 	};
 }
 
-// Every built-in check's descriptor: the base and scripture phrase rules plus the
+// Every built-in check's descriptor: every pack's phrase rules plus the
 // cross-sentence heuristics, in a stable order. This is the whole built-in
 // catalogue regardless of any group, so describeCheck can resolve a slug that a
 // specific group does not draw (a scripture check looked up from a base group).
 function builtinCheckDescriptors(): CheckDescriptor[] {
 	return [
-		...BASE_RULES.map(mechanicalDescriptor),
-		...SCRIPTURE_RULES.map(mechanicalDescriptor),
+		...ALL_PACK_RULES.map(mechanicalDescriptor),
 		...HEURISTIC_RULES.map(heuristicDescriptor),
 	];
 }

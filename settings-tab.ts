@@ -12,7 +12,7 @@ import type PlumblinePlugin from './main';
 import type { CheckState } from './main';
 import { allGroups } from './engine/group-store';
 import type { GroupDefinition } from './engine/groups';
-import { SCRIPTURE_PACK_ID } from './engine/scripture';
+import { OPTIONAL_PACKS } from './engine/genre-packs';
 import { prettifySlug } from './engine/config';
 import type { Severity } from './engine/types';
 import {
@@ -85,7 +85,7 @@ export class PlumblineSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Active group',
-						desc: 'The group of checks to run on your notes. A group turns a set of checks on and tunes them. The two starters are read-only worked examples; editing one makes an editable copy. A note can override this with a plumbline-profile key in its frontmatter.',
+						desc: 'The group of checks to run on your notes. A group turns a set of checks on and tunes them. The starters are read-only groups for common kinds of writing; editing one makes an editable copy. A note can override this with a plumbline-profile key in its frontmatter.',
 						control: {
 							type: 'dropdown',
 							key: 'activeProfile',
@@ -95,7 +95,7 @@ export class PlumblineSettingTab extends PluginSettingTab {
 					{
 						type: 'page',
 						name: 'Manage groups',
-						desc: 'Create, rename, duplicate, and delete writing groups. The two starters are read-only; duplicate one to customize it.',
+						desc: 'Create, rename, duplicate, and delete writing groups. The starters are read-only; duplicate one to customize it.',
 						displayValue: () => this.describeGroupCount(),
 						items: [
 							this.buildUserGroupList(),
@@ -304,9 +304,13 @@ export class PlumblineSettingTab extends PluginSettingTab {
 	// One-line summary of a group for its list row: which packs it draws from and
 	// how many checks it tunes away from the defaults.
 	private describeGroup(group: GroupDefinition): string {
-		const packs = group.extends.includes(SCRIPTURE_PACK_ID)
-			? 'Base and scripture packs'
-			: 'Base pack';
+		const extra = OPTIONAL_PACKS.filter((pack) =>
+			group.extends.includes(pack.id),
+		).map((pack) => pack.id);
+		const packs =
+			extra.length === 0
+				? 'Base pack'
+				: `Base and ${extra.join(' and ')} packs`;
 		const tuned = Object.keys(group.checks).length;
 		return tuned === 0 ? packs : `${packs}, ${tuned} tuned`;
 	}
@@ -635,19 +639,23 @@ class GroupEditorPage extends SettingPage {
 				}),
 		);
 
-		new Setting(editor)
-			.setName('Include scripture checks')
-			.setDesc(
-				'Verse caps, blended quotation, verbatim scripture, and the devotional-register check.',
-			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(group.extends.includes(SCRIPTURE_PACK_ID))
-					.setDisabled(readOnly)
-					.onChange((value) => {
-						void this.plugin.setGroupScripture(group.id, value);
-					}),
-			);
+		for (const pack of OPTIONAL_PACKS) {
+			new Setting(editor)
+				.setName(pack.name)
+				.setDesc(pack.desc)
+				.addToggle((toggle) =>
+					toggle
+						.setValue(group.extends.includes(pack.id))
+						.setDisabled(readOnly)
+						.onChange((value) => {
+							void this.plugin.setGroupPack(
+								group.id,
+								pack.id,
+								value,
+							);
+						}),
+				);
+		}
 
 		new Setting(editor)
 			.setName('Roll up a repeated check after')

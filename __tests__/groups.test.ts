@@ -25,10 +25,16 @@ const devotional = group(DEVOTIONAL_NONFICTION_ID);
 const plain = group(PLAIN_NONFICTION_ID);
 
 describe('starter groups', () => {
-	it('ships the two built-in starters, read-only', () => {
+	it('ships the built-in starters, read-only', () => {
 		expect(STARTER_GROUPS.map((g) => g.id)).toEqual([
 			DEVOTIONAL_NONFICTION_ID,
 			PLAIN_NONFICTION_ID,
+			'business-writing',
+			'technical-writing',
+			'fiction',
+			'creative-nonfiction',
+			'academic',
+			'marketing-copy',
 		]);
 		expect(STARTER_GROUPS.every((g) => g.builtIn)).toBe(true);
 	});
