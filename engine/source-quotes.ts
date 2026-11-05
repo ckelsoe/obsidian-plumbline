@@ -16,7 +16,7 @@ import { normalize } from './verbatim';
 // them in as an index.
 
 export const SOURCE_QUOTE_SLUG = 'quote-not-in-source';
-export const SOURCE_QUOTE_PACK_ID = 'quote-source';
+const SOURCE_QUOTE_PACK_ID = 'quote-source';
 
 // One note in a source folder, with its text already prepared by
 // prepareSourceText, so each lint pass only searches.
@@ -267,7 +267,7 @@ function searchableFragments(quote: string): string[] {
 // Whether a quote holds any words to check. One made only of gaps or an
 // insertion ("[inaudible]") is not a claim about the source's wording, so it
 // is neither passed nor flagged.
-export function hasQuotedWords(quote: string): boolean {
+function hasQuotedWords(quote: string): boolean {
 	return searchableFragments(quote).length > 0;
 }
 
