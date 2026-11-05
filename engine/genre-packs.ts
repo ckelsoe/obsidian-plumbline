@@ -29,7 +29,7 @@ function withPronouns(verbs: readonly string[]): string[] {
 	);
 }
 
-export const BUSINESS_RULES: Rule[] = [
+const BUSINESS_RULES: Rule[] = [
 	{
 		slug: 'business-jargon',
 		packId: BUSINESS_PACK_ID,
@@ -86,7 +86,7 @@ export const BUSINESS_RULES: Rule[] = [
 	},
 ];
 
-export const TECHNICAL_RULES: Rule[] = [
+const TECHNICAL_RULES: Rule[] = [
 	{
 		slug: 'minimizer',
 		packId: TECHNICAL_PACK_ID,
@@ -141,7 +141,7 @@ export const TECHNICAL_RULES: Rule[] = [
 	},
 ];
 
-export const FICTION_RULES: Rule[] = [
+const FICTION_RULES: Rule[] = [
 	{
 		slug: 'stock-fiction-phrase',
 		packId: FICTION_PACK_ID,
@@ -220,7 +220,7 @@ export const FICTION_RULES: Rule[] = [
 	},
 ];
 
-export const MARKETING_RULES: Rule[] = [
+const MARKETING_RULES: Rule[] = [
 	{
 		slug: 'hype-word',
 		packId: MARKETING_PACK_ID,

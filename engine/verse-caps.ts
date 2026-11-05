@@ -6,7 +6,7 @@ import { Citation, countVerses } from './citation';
 // finalizing. Public-domain translations (KJV, ASV, WEB, ...) have no cap and are
 // absent here. The per-book and percent-of-work limits need more data (book verse
 // totals, work size) and come later.
-export const VERSE_CAPS: Record<string, number> = {
+const VERSE_CAPS: Record<string, number> = {
 	ESV: 500,
 	NASB: 1000,
 	NIV: 500,
