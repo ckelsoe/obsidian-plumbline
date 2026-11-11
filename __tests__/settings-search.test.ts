@@ -32,8 +32,9 @@ interface Item {
 	items?: Item[];
 }
 
-function leaves(items: Item[]): Item[] {
-	return items.flatMap((i) => (i.items ? leaves(i.items) : [i]));
+// Every definition, pages and groups included: a page is found by its name too.
+function all(items: Item[]): Item[] {
+	return items.flatMap((i) => [i, ...(i.items ? all(i.items) : [])]);
 }
 
 describe('settings search', () => {
@@ -46,7 +47,7 @@ describe('settings search', () => {
 		references: { list: () => [] },
 	} as unknown as PlumblinePlugin;
 	const tab = new PlumblineSettingTab({} as App, plugin);
-	const items = leaves(tab.getSettingDefinitions() as unknown as Item[]);
+	const items = all(tab.getSettingDefinitions() as unknown as Item[]);
 	const custom = items.filter((i) => i.render !== undefined && !i.type);
 
 	it('draws nothing by hand except the footer, which stays out of search', () => {
@@ -54,8 +55,10 @@ describe('settings search', () => {
 		expect(custom[0]?.searchable).toBe(false);
 	});
 
-	it('gives every other setting a name and a string description', () => {
-		for (const i of items.filter((c) => c.searchable !== false)) {
+	it('keeps every other setting searchable, with a name and a string description', () => {
+		const leaves = items.filter((i) => !i.items && i.type !== 'heading');
+		for (const i of leaves.filter((c) => c !== custom[0])) {
+			expect(i.searchable).not.toBe(false);
 			expect(typeof i.name).toBe('string');
 			expect(i.name).not.toBe('');
 			expect(typeof i.desc).toBe('string');
@@ -69,6 +72,9 @@ describe('settings search', () => {
 			'Roll up a repeated check after',
 			'Underline flagged phrases',
 			'Pause length in minutes',
+			'Manage groups',
+			'Check library',
+			'References',
 		])
 			expect(names).toContain(n);
 	});

@@ -125,26 +125,32 @@ function inlineCodeSpans(text: string): Span[] {
 
 // HTML comments, `<!-- ... -->`, spanning one or more lines. Each comment is
 // tagged as an Annoteca marker or a plain HTML comment, so the two can be masked
-// independently. The body is matched lazily so each `-->` closes its own comment;
-// an unterminated `<!--` is left unmasked rather than swallowing the rest of the
-// note while the writer is still typing it. `wantAnnoteca`/`wantHtml` select which
-// kinds to emit, so a disabled kind is never collected.
+// independently. Each `-->` closes its own comment; an unterminated `<!--` is
+// left unmasked rather than swallowing the rest of the note while the writer is
+// still typing it. Scanned with indexOf: a lazy `<!--[\s\S]*?-->` pattern
+// rescans the rest of the note from every unclosed opening, which is quadratic.
+// `wantAnnoteca`/`wantHtml` select which kinds to emit, so a disabled kind is
+// never collected.
 function commentSpans(
 	text: string,
 	wantAnnoteca: boolean,
 	wantHtml: boolean,
 ): Span[] {
 	const spans: Span[] = [];
-	const re = /<!--[\s\S]*?-->/g;
-	for (let m = re.exec(text); m !== null; m = re.exec(text)) {
-		const isAnnoteca = ANNOTECA_OPENER.test(m[0]);
+	for (let start = text.indexOf('<!--'); start !== -1;) {
+		const close = text.indexOf('-->', start + 4);
+		// No close after this opening means none after any later one either.
+		if (close === -1) break;
+		const end = close + 3;
+		const isAnnoteca = ANNOTECA_OPENER.test(text.slice(start, end));
 		if (isAnnoteca ? wantAnnoteca : wantHtml) {
 			spans.push({
-				start: m.index,
-				end: re.lastIndex,
+				start,
+				end,
 				kind: isAnnoteca ? ANNOTECA_COMMENT_KIND : HTML_COMMENT_KIND,
 			});
 		}
+		start = text.indexOf('<!--', end);
 	}
 	return spans;
 }
