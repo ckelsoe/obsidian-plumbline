@@ -3,7 +3,7 @@ import { Severity } from './engine/types';
 // The one-line summary behind the gutter bar's tooltip.
 //
 // Kept out of editor-decorations.ts so it can be tested: that module imports
-// @codemirror/view and Obsidian's DOM helpers, and this project's jest runs on
+// @codemirror/view and Obsidian's DOM helpers, and this project's Vitest runs on
 // the 'node' environment with neither available. Same split as
 // underline-coverage.ts.
 

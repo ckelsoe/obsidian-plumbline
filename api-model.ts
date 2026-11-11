@@ -4,7 +4,7 @@ import { Finding, Severity } from './engine/types';
 // and the subscriber bookkeeping behind onFindingsChanged.
 //
 // Split out for the same reason gutter-summary.ts and panel-model.ts are: api.ts
-// imports Obsidian, and this project's jest runs on the 'node' environment.
+// imports Obsidian, and this project's Vitest runs on the 'node' environment.
 
 // Checked by the consumer before any call. An integer, and unknown or higher
 // means degrade to unpaired behaviour rather than guess (contract 7).

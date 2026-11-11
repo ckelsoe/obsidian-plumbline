@@ -6,7 +6,7 @@ import { Finding, Occurrence, Severity } from './engine/types';
 // interop-contract section 3, as data rather than as DOM.
 //
 // Kept out of findings-view.ts so it can be tested. That module imports Obsidian,
-// and this project's jest runs on the 'node' environment. Same split as
+// and this project's Vitest runs on the 'node' environment. Same split as
 // gutter-summary.ts and underline-coverage.ts.
 
 // Rows shown before the panel offers "show all". A pathological note should not
