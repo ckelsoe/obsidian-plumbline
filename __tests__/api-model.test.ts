@@ -135,7 +135,7 @@ describe('FindingsListeners', () => {
 	// take down the edit that triggered the emit.
 	it('keeps going when a subscriber throws', () => {
 		const listeners = new FindingsListeners();
-		const errors = jest
+		const errors = vi
 			.spyOn(console, 'error')
 			.mockImplementation(() => undefined);
 		const seen: string[] = [];
