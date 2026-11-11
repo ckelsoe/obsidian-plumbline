@@ -99,7 +99,7 @@ export class FindingsView extends ItemView {
 		const el = this.containerEl.querySelector(
 			`[data-plumbline-focus="${CSS.escape(this.focusKey)}"]`,
 		);
-		return el instanceof HTMLElement ? el : null;
+		return el?.instanceOf(HTMLElement) ? el : null;
 	}
 
 	// The offset the row containing `start` is keyed by, which is that row's

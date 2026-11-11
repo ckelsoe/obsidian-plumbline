@@ -1,4 +1,5 @@
 import { lint } from '../engine/lint';
+import { timeBudget } from './time-budget';
 import { resolveConfig } from '../engine/config';
 import { resolveGroup, starterGroup } from '../engine/groups';
 
@@ -280,5 +281,16 @@ describe('repeated-word through lint()', () => {
 		// Masked to "the\n   the", which looks like list indentation. A fix
 		// here would delete the code.
 		expect(repeated('Set the\n`x`the value.')).toEqual([]);
+	});
+});
+
+describe('lint: pathological input', () => {
+	// Many comment openings and no close. A lazy comment pattern rescanned the
+	// rest of the note from every opening, which is quadratic.
+	it('lints a note of unclosed comment openings in linear time', () => {
+		const text = 'Prose. ' + '<!-- '.repeat(50_000);
+		const started = performance.now();
+		lint(text, config);
+		expect(performance.now() - started).toBeLessThan(timeBudget(1000));
 	});
 });

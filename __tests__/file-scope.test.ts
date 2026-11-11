@@ -1,4 +1,5 @@
 import { fileScope } from '../engine/file-scope';
+import { timeBudget } from './time-budget';
 import { lint } from '../engine/lint';
 import { resolveConfig } from '../engine/config';
 
@@ -330,5 +331,27 @@ describe('documenting the feature does not disable it', () => {
 			resolveConfig('scripture-book'),
 		).diagnostics.map((d) => d.ruleSlug);
 		expect(slugs).toContain('reader-direction');
+	});
+});
+
+describe('fileScope: pathological input', () => {
+	// Many directive openings and no `>` after them. A pattern that matched the
+	// body up to `>` rescanned the rest of the note from every opening, which is
+	// quadratic: this input took seconds that way.
+	it('reads a note of unclosed openings in linear time', () => {
+		const text = '<!--plumbline:' + '<!--plumbline:='.repeat(50_000);
+		const started = performance.now();
+		const scope = fileScope(text);
+		expect(performance.now() - started).toBeLessThan(timeBudget(250));
+		expect(scope.skipRanges).toEqual([]);
+		expect(scope.disabledSlugs).toEqual([]);
+	});
+
+	it('reads the directive after a run of openings that one `>` closes', () => {
+		const junk = '<!--plumbline:'.repeat(1_000) + '>\n';
+		const text = junk + '<!-- plumbline: off -->\nskipped';
+		expect(fileScope(text).skipRanges).toEqual([
+			{ start: junk.length, end: text.length },
+		]);
 	});
 });

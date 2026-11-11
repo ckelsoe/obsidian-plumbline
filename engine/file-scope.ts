@@ -36,16 +36,14 @@ const ID = '[a-z][a-z0-9-]*';
 // describe block in __tests__/file-scope.test.ts is the half that lives here,
 // and it carries a colon-form control so the rejection cannot pass vacuously.
 //
-// Two captures: the marker that says which spelling this is, then everything up
-// to the closing `>`.
-//
-// Linear by construction. `[^>]*` is greedy over a class that cannot match `>`,
-// so it stops at the first `>` in one pass with nothing to backtrack over. That
-// means the capture swallows the `--` of the terminator, which the reader below
-// strips: a lazy `[^>]*?` followed by `\s*-->` reads more naturally and is the
-// shape sonarjs flags for super-linear backtracking, on input that is a user's
-// note.
-const DIRECTIVE_RE = /<!--\s*plumbline(-disable|-enable|:)([^>]*)>/g;
+// The pattern finds only the opening and captures the marker that says which
+// spelling this is. The body, everything up to the next `>`, is found with
+// indexOf. Matching the body in the pattern too (`([^>]*)>`) is quadratic on a
+// note with many openings and no `>` after them: every opening scans to the end
+// of the note before failing. A scan for the `>` that finds none means no later
+// opening can close either, so the loop stops there. The body swallows the `--`
+// of the terminator, which the reader below strips.
+const DIRECTIVE_RE = /<!--\s*plumbline(-disable|-enable|:)/g;
 
 // `plumbline-disabled-rules: [a, b]`, `plumbline-disabled-rules: all`, or a
 // YAML list. Parsed with a small reader rather than a YAML dependency, because
@@ -192,19 +190,23 @@ export function fileScope(text: string): FileScope {
 		m !== null;
 		m = DIRECTIVE_RE.exec(text)
 	) {
+		const close = text.indexOf('>', DIRECTIVE_RE.lastIndex);
+		if (close === -1) break;
+		const raw = text.slice(DIRECTIVE_RE.lastIndex, close);
+		const end = close + 1;
+		DIRECTIVE_RE.lastIndex = end;
 		// A directive inside a fence, an inline code span or the frontmatter block
 		// is the text it looks like, not an instruction. Writing about this
 		// feature means putting `<!-- plumbline: off -->` in a fenced example, and
 		// obeying that one would silently stop linting the rest of the note.
 		if (isLiteral(literals, m.index)) continue;
-		// The trailing `--` of the terminator lands in the second capture, since
-		// the class that stops at `>` cannot exclude it. Checked here rather than
+		// The trailing `--` of the terminator lands in the body, since the scan
+		// that stops at `>` cannot exclude it. Checked here rather than
 		// in the pattern: requiring `-->` in the regex means backtracking over the
 		// comment body, which is the shape sonarjs flags. A `<!-- plumbline: off >`
 		// is unterminated, so it is text a writer is still typing, not a directive
 		// that should silence the rest of the note.
 		const marker = m[1] ?? '';
-		const raw = m[2] ?? '';
 		if (!raw.endsWith('--')) continue;
 		const rest = raw.slice(0, -2).trim();
 		const words = rest === '' ? [] : rest.split(/\s+/);
@@ -235,7 +237,7 @@ export function fileScope(text: string): FileScope {
 					if (openedAt !== undefined) {
 						skipRanges.push({
 							start: openedAt,
-							end: m.index + m[0].length,
+							end: end,
 						});
 						openedAt = undefined;
 					}
