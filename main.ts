@@ -1859,9 +1859,8 @@ export default class PlumblinePlugin extends Plugin {
 			new Notice('Plumbline: open a note first.');
 			return;
 		}
-		const frontmatter = this.app.metadataCache.getFileCache(
-			view.file,
-		)?.frontmatter;
+		const frontmatter: Record<string, unknown> | undefined =
+			this.app.metadataCache.getFileCache(view.file)?.frontmatter;
 		const raw: unknown = frontmatter?.provenance;
 		const provenance = typeof raw === 'string' ? raw : '';
 		if (provenance === '') {
@@ -2058,7 +2057,7 @@ export default class PlumblinePlugin extends Plugin {
 			if (!Array.isArray(list)) return [];
 			return list
 				.filter(
-					(c): c is { id: string; displayName: string } =>
+					(c: unknown): c is { id: string; displayName: string } =>
 						typeof c === 'object' &&
 						c !== null &&
 						typeof (c as { id?: unknown }).id === 'string' &&
@@ -2158,7 +2157,7 @@ export default class PlumblinePlugin extends Plugin {
 			}
 			return anchors
 				.filter(
-					(a): a is Record<string, unknown> =>
+					(a: unknown): a is Record<string, unknown> =>
 						typeof a === 'object' &&
 						a !== null &&
 						typeof (a as { start?: unknown }).start === 'number' &&
@@ -2227,7 +2226,10 @@ export default class PlumblinePlugin extends Plugin {
 					// than appended to, since appending to a string would produce
 					// neither a list nor a scalar.
 					const current = Array.isArray(raw)
-						? raw.filter((v): v is string => typeof v === 'string')
+						? raw.filter(
+								(v: unknown): v is string =>
+									typeof v === 'string',
+							)
 						: typeof raw === 'string'
 							? [raw]
 							: [];

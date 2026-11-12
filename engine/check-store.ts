@@ -118,7 +118,7 @@ export function parseUserChecks(raw: unknown): CustomCheck[] {
 	}
 	const seen = new Set<string>();
 	const checks: CustomCheck[] = [];
-	for (const entry of raw) {
+	for (const entry of raw as unknown[]) {
 		const check = asCustomCheck(entry);
 		if (check === null) {
 			continue;
