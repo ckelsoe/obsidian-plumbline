@@ -94,7 +94,7 @@ export function parseUserGroups(raw: unknown): GroupDefinition[] {
 	}
 	const seen = new Set<string>();
 	const groups: GroupDefinition[] = [];
-	for (const entry of raw) {
+	for (const entry of raw as unknown[]) {
 		const group = asGroup(entry);
 		if (group === null) {
 			continue;

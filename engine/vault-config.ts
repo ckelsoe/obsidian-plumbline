@@ -40,7 +40,7 @@ export function asStringArray(value: unknown): string[] {
 	if (!Array.isArray(value)) {
 		return [];
 	}
-	return value.filter((v): v is string => typeof v === 'string');
+	return value.filter((v: unknown): v is string => typeof v === 'string');
 }
 
 export function asSeverity(value: unknown): Severity | undefined {

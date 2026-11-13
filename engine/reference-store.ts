@@ -88,7 +88,9 @@ export function parseReferenceStore(raw: unknown): ReferenceStore {
 	const obj = raw as Record<string, unknown>;
 	const references: Reference[] = [];
 	const ids = new Set<string>();
-	for (const entry of Array.isArray(obj.references) ? obj.references : []) {
+	for (const entry of (Array.isArray(obj.references)
+		? obj.references
+		: []) as unknown[]) {
 		const reference = asReference(entry);
 		if (reference && !ids.has(reference.id)) {
 			ids.add(reference.id);
