@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-13
+
 ### Fixed
 - A long note with many `<!-- plumbline:` openings and no closing `>` after them no longer stalls the editor. Reading the directives took time that grew with the square of the note's length; it now grows in step with it. A note of 50,000 such openings took about 15 seconds and now takes a few milliseconds.
 
